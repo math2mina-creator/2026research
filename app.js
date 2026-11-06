@@ -15,9 +15,9 @@ const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg
 const ACCEPT_OUTPUT = ACCEPT + ',.gif,.webp,.mp4,.mov,.m4a,.mp3,.txt,.csv';
 const acceptFor = g => g.key === 'output' ? ACCEPT_OUTPUT : ACCEPT;
 const STAGES = [
-  { key: 'intro', label: '서론', full: '최종보고서 1. 서론', desc: '연구 주제 선정 이유, 연구 주제와 관련된 연구 동향 분석', due: 'report_due', group: 'report' },
-  { key: 'body', label: '본론', full: '최종보고서 2. 본론', desc: '연구 내용 설명', due: 'report_due', group: 'report' },
-  { key: 'conclusion', label: '결론', full: '최종보고서 3. 결론', desc: '보고서 결론', due: 'report_due', group: 'report' },
+  { key: 'intro', label: '서론', full: '최종보고서 1. 서론', desc: '연구 주제 선정 이유, 연구 주제와 관련된 연구 동향 분석', due: 'intro_due', group: 'report' },
+  { key: 'body', label: '본론', full: '최종보고서 2. 본론', desc: '연구 내용 설명', due: 'body_due', group: 'report' },
+  { key: 'conclusion', label: '결론', full: '최종보고서 3. 결론', desc: '보고서 결론', due: 'conclusion_due', group: 'report' },
   { key: 'extra', label: '개인연구', full: '개인연구보고서', desc: '실험 대상 학생 추가 제출', due: 'extra_due', group: 'extra' },
   { key: 'output', label: '산출물', full: '산출물', desc: '연구 과정에서 만든 결과물 (사진, 발표자료, 모형·작품 사진, 영상 등)', due: 'output_due', group: 'output' }
 ];
@@ -39,7 +39,9 @@ const EXTRA = STAGES.find(g => g.key === 'extra');
 const PARTS = STAGES.filter(g => g.group === 'report');
 const stageMap = () => Object.fromEntries(STAGES.map(g => [g.key, '']));
 const evMap = () => Object.fromEntries(STAGES.map(g => [g.key, []]));
-const DUES = [{ key: 'report_due', label: '최종보고서' }, { key: 'extra_due', label: '개인연구보고서', extra: true }, { key: 'output_due', label: '산출물' }];
+const DUES = [{ key: 'intro_due', label: '서론' }, { key: 'body_due', label: '본론' }, { key: 'conclusion_due', label: '결론' }, { key: 'extra_due', label: '개인연구보고서', extra: true }, { key: 'output_due', label: '산출물' }];
+/* 마감일: 부분별 마감일이 없으면 예전 '최종보고서 마감일'을 씁니다. */
+const dueFrom = (settings, key) => (settings && (settings[key] || (['intro_due', 'body_due', 'conclusion_due'].includes(key) ? settings.report_due : null))) || null;
 const ST = {
   none: { label: '미제출', color: 'var(--none)' },
   waiting: { label: '피드백 대기', color: 'var(--blue)' },
@@ -372,8 +374,11 @@ const Teacher = {
     <div class="modal" id="mSet" role="dialog" aria-modal="true" aria-labelledby="mSetT"><div class="mbox">
       <h2 id="mSetT">프로그램 설정</h2>
       <div class="field"><label class="l" for="sName">프로그램 이름</label><input class="in" id="sName"></div>
-      <div class="row2 eq">
-        <div class="field"><label class="l" for="sReport">최종보고서 마감일</label><input class="in" id="sReport" type="date"></div>
+      <p class="hint" style="margin:4px 0 10px">최종보고서</p>
+      <div class="row3">
+        <div class="field"><label class="l" for="sIntro">1. 서론 마감일</label><input class="in" id="sIntro" type="date"></div>
+        <div class="field"><label class="l" for="sBody">2. 본론 마감일</label><input class="in" id="sBody" type="date"></div>
+        <div class="field"><label class="l" for="sConclusion">3. 결론 마감일</label><input class="in" id="sConclusion" type="date"></div>
       </div>
       <div class="row2 eq">
         <div class="field"><label class="l" for="sExtra">개인연구보고서 마감일</label><input class="in" id="sExtra" type="date"></div>
@@ -476,9 +481,9 @@ const Teacher = {
     $('title').textContent = c.program_name || '개인연구 제출·피드백 관리';
     document.title = $('title').textContent;
     const anyExtra = [...this.students.values()].some(s => s.extra_required);
-    $('dues').innerHTML = DUES.filter(g => !g.extra || anyExtra).map(g => c[g.key]
-      ? `<span>${g.label} 마감 <b>${fmtDate(c[g.key])}</b>${ddayTag(c[g.key])}</span>`
-      : `<span>${g.label} 마감 <b>미정</b></span>`).join('') + '<button class="linkbtn" id="bSet">마감일 설정</button>';
+    $('dues').innerHTML = DUES.filter(g => !g.extra || anyExtra).map(g => { const v = dueFrom(c, g.key); return v
+      ? `<span>${g.label} <b>${fmtDate(v)}</b>${ddayTag(v)}</span>`
+      : `<span>${g.label} <b>미정</b></span>`; }).join('') + '<button class="linkbtn" id="bSet">마감일 설정</button>';
     $('bSet').onclick = () => this.openSettings();
   },
 
@@ -498,7 +503,7 @@ const Teacher = {
       <div class="legend">${ORDER.filter(k => k !== 'none').map(k => `<span><i style="background:${ST[k].color}"></i>${ST[k].label}</span>`).join('')}</div></div>`;
     const wait = list.reduce((a, s) => a + stagesFor(s).filter(g => s[g.key].status === 'waiting').length, 0);
     const rev = list.reduce((a, s) => a + stagesFor(s).filter(g => s[g.key].status === 'revise').length, 0);
-    const late = list.filter(s => stagesFor(s).some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]))).length;
+    const late = list.filter(s => stagesFor(s).some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)))).length;
     const nomail = list.filter(s => !s.email).length;
     const noconsent = list.filter(s => s.email && !hasConsent(s)).length;
     html += `<div class="sum"><h2>지금 할 일</h2><div class="todo-list">
@@ -535,7 +540,7 @@ const Teacher = {
     if (f === 'extra') return !!s.extra_required;
     if (f === 'output-none') return s.output.status === 'none';
     if (f === 'report-none') return PARTS.some(g => s[g.key].status === 'none');
-    if (f === 'late') return stagesFor(s).some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]));
+    if (f === 'late') return stagesFor(s).some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)));
     if (f === 'alldone') return stagesFor(s).every(g => s[g.key].status === 'done');
     if (f === 'nomail') return !s.email;
     if (f === 'noconsent') return !!s.email && !hasConsent(s);
@@ -543,7 +548,6 @@ const Teacher = {
   },
 
   partsCell(s) {
-    const due = this.settings.report_due;
     const chips = PARTS.map(g => {
       const k = s[g.key].status || 'none';
       return `<span class="chip ${k}${this.justStamped === s.id + g.key ? ' pressed' : ''}" title="${g.full}: ${ST[k].label}">${k === 'done' ? '✓ ' : ''}${g.label}</span>`;
@@ -551,7 +555,8 @@ const Teacher = {
     const ek = s.extra_required ? (s.extra.status || 'none') : null;
     const extraChip = ek ? `<span class="chip ${ek} extra${this.justStamped === s.id + 'extra' ? ' pressed' : ''}" title="개인연구보고서: ${ST[ek].label}">${ek === 'done' ? '✓ ' : ''}개인연구</span>` : '';
     const missing = PARTS.filter(g => s[g.key].status === 'none').length;
-    const meta = missing && isPast(due) ? '<div class="meta warn">마감 지남</div>'
+    const overdue = [...PARTS, ...(s.extra_required ? [EXTRA] : []), OUTPUT].some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)));
+    const meta = overdue ? '<div class="meta warn">마감 지난 미제출 있음</div>'
       : [...PARTS, ...(s.extra_required ? [EXTRA] : []), OUTPUT].some(g => s[g.key].status === 'waiting') ? '<div class="meta">피드백 대기 있음</div>' : '';
     const ok = s.output.status || 'none';
     const outChip = `<span class="chip ${ok} out${this.justStamped === s.id + 'output' ? ' pressed' : ''}" title="산출물: ${ST[ok].label}">${ok === 'done' ? '✓ ' : ''}산출물</span>`;
@@ -561,7 +566,7 @@ const Teacher = {
   stageCell(s, g) {
     const st = s[g.key];
     const k = st.status || 'none';
-    const due = this.settings[g.due];
+    const due = dueFrom(this.settings, g.due);
     let meta = '';
     if (k === 'none') { if (isPast(due)) meta = '<div class="meta warn">마감 지남</div>'; }
     else if (st.submitted_at) {
@@ -1115,13 +1120,15 @@ const Teacher = {
   closeModal(id) { $(id).classList.remove('on'); },
   openSettings() {
     $('sName').value = this.settings.program_name || '';
-    $('sReport').value = this.settings.report_due || '';
+    $('sIntro').value = dueFrom(this.settings, 'intro_due') || '';
+    $('sBody').value = dueFrom(this.settings, 'body_due') || '';
+    $('sConclusion').value = dueFrom(this.settings, 'conclusion_due') || '';
     $('sExtra').value = this.settings.extra_due || '';
     $('sOutput').value = this.settings.output_due || '';
     this.openModal('mSet');
   },
   async saveSettings() {
-    const c = { program_name: $('sName').value.trim() || null, report_due: $('sReport').value || null, extra_due: $('sExtra').value || null, output_due: $('sOutput').value || null };
+    const c = { program_name: $('sName').value.trim() || null, intro_due: $('sIntro').value || null, body_due: $('sBody').value || null, conclusion_due: $('sConclusion').value || null, report_due: null, extra_due: $('sExtra').value || null, output_due: $('sOutput').value || null };
     const { error } = await sb.from('settings').update(c).eq('id', 1);
     if (error) { toast(dbMsg(error)); return; }
     this.settings = { ...this.settings, ...c };
@@ -1293,7 +1300,7 @@ const Student = {
   card(g) {
     const sub = this.subs[g.key] || { status: 'none' };
     const k = sub.status || 'none';
-    const due = this.settings[g.due];
+    const due = dueFrom(this.settings, g.due);
     const evs = this.events.filter(e => e.stage === g.key);
     const canSubmit = k !== 'done';
     const guide = {
@@ -1334,7 +1341,7 @@ const Student = {
         <p class="me-topic">${me.topic ? '연구 주제: ' + esc(me.topic) : '연구 주제가 아직 등록되지 않았습니다.'}</p>
       </div></header>
       ${this.tplLinks('all', true)}
-      <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요${this.settings.report_due ? ` · 마감 ${fmtDate(this.settings.report_due)}` : ''}</span></h2>
+      <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요. 부분마다 마감일이 다를 수 있어요.</span></h2>
       ${this.tplLinks('report', true)}
       <div class="cards three">${PARTS.map(g => this.card(g)).join('')}</div>
       ${me.extra_required ? `<h2 class="group-title">개인연구보고서 <span>실험 대상 학생은 개인연구보고서도 한글 파일로 제출하세요</span></h2>
