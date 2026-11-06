@@ -23,6 +23,9 @@ const ST = {
   done: { label: '확인 완료', color: 'var(--stamp)' }
 };
 const ORDER = ['waiting', 'revise', 'done', 'none'];
+/* 동의서 내용을 바꾸면 이 값을 올리세요. 학생 전원이 다시 동의하게 됩니다. */
+const CONSENT_VERSION = '2026-1';
+const hasConsent = s => !!(s && s.consent_at && s.consent_version === CONSENT_VERSION);
 
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
 const dateOf = ts => ts ? new Date(ts).toLocaleDateString('sv-SE') : '';
@@ -293,6 +296,7 @@ const Teacher = {
         <option value="late">마감 지남 미제출</option>
         <option value="alldone">모두 확인 완료</option>
         <option value="nomail">이메일 미등록</option>
+        <option value="noconsent">개인정보 동의 전</option>
       </select>
       <select class="f" id="fsort" aria-label="정렬">
         <option value="sid">학번순</option><option value="name">이름순</option><option value="recent">최근 활동순</option>
@@ -429,11 +433,13 @@ const Teacher = {
     const rev = list.reduce((a, s) => a + STAGES.filter(g => s[g.key].status === 'revise').length, 0);
     const late = list.filter(s => STAGES.some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]))).length;
     const nomail = list.filter(s => !s.email).length;
+    const noconsent = list.filter(s => s.email && !hasConsent(s)).length;
     html += `<div class="sum"><h2>지금 할 일</h2><div class="todo-list">
       <button class="todo wait" data-f="wait"><span>피드백을 기다리는 제출물</span><span class="n">${wait}</span></button>
       <button class="todo rev" data-f="revise"><span>보완 요청 후 재제출 대기</span><span class="n">${rev}</span></button>
       <button class="todo late" data-f="late"><span>마감 지나고 미제출한 학생</span><span class="n">${late}</span></button>
       ${nomail ? `<button class="todo mail" data-f="nomail"><span>이메일 미등록 (로그인 불가)</span><span class="n">${nomail}</span></button>` : ''}
+      ${noconsent ? `<button class="todo mail" data-f="noconsent"><span>개인정보 동의 전</span><span class="n">${noconsent}</span></button>` : ''}
       ${wait ? `<button class="btn primary" id="rvStart">대기 중인 제출물 차례로 검토하기</button>` : ''}
     </div></div>`;
     $('summary').innerHTML = html;
@@ -464,6 +470,7 @@ const Teacher = {
     if (f === 'late') return STAGES.some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]));
     if (f === 'alldone') return STAGES.every(g => s[g.key].status === 'done');
     if (f === 'nomail') return !s.email;
+    if (f === 'noconsent') return !!s.email && !hasConsent(s);
     return true;
   },
 
@@ -490,7 +497,7 @@ const Teacher = {
       return (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }) || a.name.localeCompare(b.name, 'ko');
     });
     $('rows').innerHTML = list.map(s => `<tr data-id="${esc(s.id)}" tabindex="0">
-      <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${s.email ? '' : '<span class="nomail">이메일 없음</span>'}</td>
+      <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${!s.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(s) ? '' : '<span class="nomail">동의 전</span>'}</td>
       <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${esc(s.topic) || '주제 미정'}</div></td>
       <td class="c-plan">${this.stageCell(s, STAGES[0])}</td>
       <td class="c-report">${this.stageCell(s, STAGES[1])}</td>
@@ -596,6 +603,7 @@ const Teacher = {
       </div>
       <div class="field"><label class="l" for="f-email">학교 구글 이메일 (학생 로그인용)</label><input class="in" id="f-email" data-k="email" type="email" autocomplete="off" value="${esc(d.email)}"></div>
       <div class="field"><label class="l" for="f-topic">연구 주제</label><input class="in" id="f-topic" data-k="topic" value="${esc(d.topic)}"></div>
+      ${this.isNew ? '' : `<p class="hint" style="margin:-4px 0 12px">개인정보 수집·이용 동의: ${hasConsent(d) ? fmtDT(d.consent_at) + ' 동의함' + (/^data:image\/png;base64,/.test(d.consent_signature || '') ? `<br><img class="sig" src="${d.consent_signature}" alt="${esc(d.name)} 학생 서명">` : '') : '<span class="warn">아직 동의하지 않음</span> (학생이 처음 로그인할 때 동의 화면이 나옵니다)'}</p>`}
       <div class="field"><label class="l" for="f-memo">지도 메모 (학생에게 보이지 않음)</label><textarea class="in" id="f-memo" data-k="memo" rows="3">${esc(d.memo)}</textarea></div>
       ${STAGES.map(g => this.stageHTML(g)).join('')}`;
     this.bindDrawer();
@@ -985,12 +993,12 @@ const Teacher = {
   exportCsv() {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const lastNote = arr => (arr.find(e => e.kind === 'feedback' && e.note) || {}).note || '';
-    const head = ['학번', '이름', '반', '이메일', '연구 분야', '연구 주제', '계획서 상태', '계획서 제출일', '계획서 최근 피드백', '보고서 상태', '보고서 제출일', '보고서 최근 피드백', '지도 메모'];
+    const head = ['학번', '이름', '반', '이메일', '연구 분야', '연구 주제', '계획서 상태', '계획서 제출일', '계획서 최근 피드백', '보고서 상태', '보고서 제출일', '보고서 최근 피드백', '개인정보 동의일', '지도 메모'];
     const list = [...this.students.values()].sort((a, b) => (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }));
     const lines = [head.map(q).join(',')].concat(list.map(s => [
       s.sid, s.name, s.cls, s.email, s.field, s.topic,
       ST[s.plan.status].label, dateOf(s.plan.submitted_at), lastNote(s.ev.plan),
-      ST[s.report.status].label, dateOf(s.report.submitted_at), lastNote(s.ev.report), s.memo
+      ST[s.report.status].label, dateOf(s.report.submitted_at), lastNote(s.ev.report), hasConsent(s) ? dateOf(s.consent_at) : '', s.memo
     ].map(q).join(',')));
     const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -1013,8 +1021,104 @@ const Student = {
     this.me = me;
     try { await this.load(); }
     catch (e) { renderMessage(email, '정보를 불러오지 못했습니다.', esc(dbMsg(e))); return; }
+    if (!hasConsent(this.me)) { this.renderConsent(); return; }
     this.render();
     this.markSeen();
+  },
+
+  /* 손글씨 서명란: 흰 종이 위 검은 펜 */
+  signaturePad(canvas, onChange) {
+    const ctx = canvas.getContext('2d');
+    let drawing = false, last = null, ink = 0;
+    const size = () => {
+      const r = window.devicePixelRatio || 1;
+      canvas.width = Math.round(canvas.clientWidth * r);
+      canvas.height = Math.round(canvas.clientHeight * r);
+      ctx.setTransform(r, 0, 0, r, 0, 0);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+      ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111';
+      ink = 0;
+    };
+    size();
+    const pt = e => { const b = canvas.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
+    canvas.addEventListener('pointerdown', e => { e.preventDefault(); canvas.setPointerCapture(e.pointerId); drawing = true; last = pt(e); ctx.beginPath(); ctx.arc(last.x, last.y, 1.1, 0, Math.PI * 2); ctx.fillStyle = '#111'; ctx.fill(); });
+    canvas.addEventListener('pointermove', e => {
+      if (!drawing) return;
+      const p = pt(e);
+      ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+      ink += Math.hypot(p.x - last.x, p.y - last.y);
+      last = p;
+    });
+    const end = () => { if (drawing) { drawing = false; onChange(); } };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    return {
+      signed: () => ink > 40,
+      clear: () => size(),
+      toDataURL: () => {
+        /* 저장 용량을 줄이려고 가로 600px 이하로 줄여서 저장 */
+        const w = Math.min(600, canvas.clientWidth), h = Math.round(w * canvas.clientHeight / canvas.clientWidth);
+        const out = document.createElement('canvas'); out.width = w; out.height = h;
+        out.getContext('2d').drawImage(canvas, 0, 0, w, h);
+        return out.toDataURL('image/png');
+      }
+    };
+  },
+
+  renderConsent() {
+    const me = this.me;
+    const prog = esc(this.settings.program_name || '개인연구 프로그램');
+    app.innerHTML = `${topBar(this.email)}
+      <div class="consent">
+        <h1>개인정보 수집·이용 동의</h1>
+        <p class="sub">${esc(me.name)} 학생, ${prog} 제출 사이트를 처음 사용하기 전에 아래 내용을 읽고 동의해 주세요.</p>
+        <div class="consent-box">
+          <table class="ctable">
+            <tr><th scope="row">수집 목적</th><td>개인연구 계획서·최종보고서 제출 확인, 담당 교사의 피드백 전달, 제출 현황 관리</td></tr>
+            <tr><th scope="row">수집 항목 (필수)</th><td>학번, 이름, 반, 학교 구글 계정 이메일, 연구 주제, 제출한 파일과 제출 일시, 피드백 기록과 확인 일시</td></tr>
+            <tr><th scope="row">보유 기간</th><td>해당 학년도 프로그램이 끝날 때까지 보관하고, 학년도 종료 후 담당 교사가 삭제합니다. 요청하면 그 전에도 삭제합니다.</td></tr>
+            <tr><th scope="row">열람 범위</th><td>학생 본인은 자기 자료만, 전체 자료는 담당 교사만 볼 수 있습니다. 다른 학생에게 공개되지 않습니다.</td></tr>
+            <tr><th scope="row">처리 위탁</th><td>Supabase(자료 보관, 대한민국 서울 데이터센터), Google(로그인 인증). 그 밖의 제3자에게 제공하지 않습니다.</td></tr>
+            <tr><th scope="row">동의 거부 권리</th><td>동의하지 않을 수 있습니다. 동의하지 않아도 불이익은 없으며, 이 경우 담당 교사와 상의해 다른 방법(이메일, 출력물 등)으로 제출할 수 있습니다.</td></tr>
+          </table>
+          <p class="hint">자세한 내용은 <a href="privacy.html" target="_blank" rel="noopener">개인정보처리방침</a>에서 볼 수 있습니다. 동의를 철회하거나 삭제를 원하면 담당 교사에게 말씀해 주세요.</p>
+        </div>
+        <label class="agree"><input type="checkbox" id="cAgree"> <span>위 내용을 읽었으며, 개인정보 수집·이용에 동의합니다. (필수)</span></label>
+        <div class="sign">
+          <div class="sign-h"><span>서명 (필수)</span><span class="hint">${esc(me.name)} 학생 본인이 마우스나 손가락으로 서명해 주세요.</span><button class="linkbtn" id="sClear" type="button">지우기</button></div>
+          <canvas class="sign-pad" id="sPad" role="img" aria-label="서명란"></canvas>
+          <div class="sign-foot"><span>${todayStr().replace(/-/g, '. ')}.</span><span>성명 ${esc(me.name)} (서명)</span></div>
+        </div>
+        <div class="consent-actions">
+          <button class="btn" id="cNo">동의하지 않음</button>
+          <button class="btn primary" id="cYes" disabled>동의하고 시작하기</button>
+        </div>
+      </div>`;
+    bindLogout();
+    const pad = this.signaturePad($('sPad'), () => update());
+    const update = () => { $('cYes').disabled = !($('cAgree').checked && pad.signed()); };
+    $('cAgree').onchange = update;
+    $('sClear').onclick = () => { pad.clear(); update(); };
+    $('cNo').onclick = () => {
+      app.querySelector('.consent').innerHTML = `<h1>동의하지 않았습니다</h1>
+        <p class="sub">동의하지 않으면 이 사이트를 사용할 수 없지만, 불이익은 없습니다. 담당 선생님께 말씀드리고 다른 방법으로 제출하세요.</p>
+        <p class="sub">마음이 바뀌면 이 페이지를 새로고침해서 다시 동의할 수 있습니다.</p>
+        <button class="btn" id="cBack">동의서 다시 보기</button>`;
+      $('cBack').onclick = () => this.renderConsent();
+    };
+    $('cYes').onclick = async () => {
+      $('cYes').disabled = true;
+      $('cYes').textContent = '저장 중입니다';
+      const { error } = await sb.rpc('give_consent', { p_version: CONSENT_VERSION, p_signature: pad.toDataURL() });
+      if (error) { toast('동의를 저장하지 못했습니다. 다시 눌러 주세요.'); $('cYes').disabled = false; $('cYes').textContent = '동의하고 시작하기'; return; }
+      try { await this.load(); } catch (e) { /* 아래에서 화면만 다시 그림 */ }
+      this.me.consent_at = this.me.consent_at || new Date().toISOString();
+      this.me.consent_version = CONSENT_VERSION;
+      this.render();
+      this.markSeen();
+      toast('동의했습니다. 이제 제출할 수 있습니다.');
+    };
   },
 
   async load() {
