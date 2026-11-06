@@ -94,7 +94,7 @@ function toast(t) {
 const clsFromSid = sid => /^\d{5}$/.test(String(sid || '').trim()) ? String(parseInt(String(sid).trim().slice(1, 3), 10)) : '';
 function dbMsg(error) {
   if (!error) return '';
-  if (error.code === '23505') return '같은 학번이나 이메일을 쓰는 학생이 이미 있습니다.';
+  if (error.code === '23505') return '같은 학번이나 이메일을 쓰는 학생이 이미 있습니다. 다른 선생님 담당일 수 있으니 관리자에게 확인하세요.';
   if (error.code === '42501') return '권한이 없습니다. 다시 로그인해 주세요.';
   return error.message || '요청을 처리하지 못했습니다.';
 }
@@ -363,7 +363,7 @@ const Teacher = {
       <button class="btn" id="bReload">새로고침</button>
       <button class="btn admin-only" id="bAssign">담당 배정</button>
       <button class="btn admin-only" id="bTpl">양식 관리</button>
-      <button class="btn admin-only" id="bBulk">명단 붙여넣기</button>
+      <button class="btn" id="bBulk">명단 붙여넣기</button>
       <button class="btn" id="bCsv">CSV 내보내기</button>
       <button class="btn primary" id="bAdd">학생 추가</button>
     </div>
@@ -389,6 +389,7 @@ const Teacher = {
 10206	김서율	seoyul@school.example
 10222	jinhyuk@school.example</code>
       <p class="hint">세 번째 줄처럼 학번과 이메일만 적으면 이미 등록된 학생에게 이메일만 연결됩니다.</p>
+      <p class="hint" id="bulkNote" style="color:var(--blue)"></p>
       <textarea class="in" id="bulkText" rows="9" aria-label="명단"></textarea>
       <div class="mfoot"><span class="msg" id="bulkMsg"></span><button class="btn" data-close="mBulk">취소</button><button class="btn primary" id="bulkGo">반영</button></div>
     </div></div>
@@ -483,6 +484,10 @@ const Teacher = {
     $('tGo').onclick = () => this.uploadTemplate();
     $('teachAdd').onclick = () => this.addTeacher();
     $('bAssign').onclick = () => this.openAssign();
+    $('bBulk').addEventListener('click', () => {
+      const note = $('bulkNote');
+      if (note) note.textContent = this.isAdmin ? '' : '여기서 등록한 학생은 자동으로 선생님 담당 학생이 됩니다.';
+    });
     $('asTeacher').onchange = () => this.renderAssign();
     $('asUn').onclick = () => {
       $('asList').querySelectorAll('input[data-st]').forEach(c => { if (!c.dataset.cur) c.checked = true; });
@@ -545,7 +550,7 @@ const Teacher = {
       $('bTeachers').onclick = () => this.openTeachers();
     }
     app.querySelectorAll('.admin-only').forEach(b => b.hidden = !this.isAdmin);
-    $('bAdd').hidden = !this.isAdmin;
+    $('bAdd').hidden = false;
     const ft = $('fteacher');
     ft.hidden = !this.isAdmin;
     if (this.isAdmin) {
@@ -679,7 +684,7 @@ const Teacher = {
     let empty = '';
     if (!total) empty = this.isAdmin
       ? '<div class="empty-state"><p>아직 등록된 학생이 없습니다. 반 명단을 붙여넣으면 한 번에 등록됩니다.</p><button class="btn primary" id="emptyBulk">명단 붙여넣기</button></div>'
-      : '<div class="empty-state"><p>아직 배정된 담당 학생이 없습니다. 관리자 선생님께 담당 배정을 요청하세요.</p></div>';
+      : '<div class="empty-state"><p>아직 담당 학생이 없습니다. 담당 학생 명단을 붙여넣어 직접 등록하거나, 관리자 선생님께 담당 배정을 요청하세요.</p><button class="btn primary" id="emptyBulk">명단 붙여넣기</button></div>';
     else if (!list.length) empty = '<div class="empty-state"><p>조건에 맞는 학생이 없습니다. 검색어나 필터를 바꿔 보세요.</p></div>';
     $('empty').innerHTML = empty;
     const eb = $('emptyBulk');
@@ -692,7 +697,7 @@ const Teacher = {
     if (id && !src) return;
     this.isNew = !id;
     this.openId = id || null;
-    const base = src ? clone(src) : { id: null, sid: '', name: '', cls: '', email: '', field: '', topic: '', memo: '', ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() };
+    const base = src ? clone(src) : { id: null, sid: '', name: '', cls: '', email: '', field: '', topic: '', memo: '', teacher_email: this.isAdmin ? (['', '__none'].includes($('fteacher').value) ? '' : $('fteacher').value) : this.email, ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() };
     for (const g of STAGES) base[g.key].date = dateOf(base[g.key].submitted_at);
     this.draft = base;
     this.orig = clone(base);
@@ -838,6 +843,7 @@ const Teacher = {
       extra_required: !!d.extra_required
     };
     if (this.isAdmin) row.teacher_email = d.teacher_email || null;
+    else if (this.isNew) row.teacher_email = this.email;
     if (!row.name) { toast('이름을 입력하세요.'); $('f-name').focus(); return; }
     if (row.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) { toast('이메일 형식을 확인하세요.'); $('f-email').focus(); return; }
 
@@ -1274,17 +1280,18 @@ const Teacher = {
         if (r.topic && r.topic !== ex.topic) patch.topic = r.topic;
         if (Object.keys(patch).length) updates.push({ id: ex.id, patch, label: r.sid });
       } else if (r.name) {
-        inserts.push({ sid: r.sid || null, name: r.name, email: r.email || null, topic: r.topic, cls: clsFromSid(r.sid) || null });
+        inserts.push({ sid: r.sid || null, name: r.name, email: r.email || null, topic: r.topic, cls: clsFromSid(r.sid) || null, ...(this.isAdmin ? {} : { teacher_email: this.email }) });
       } else problems.push(r.sid);
     }
     const btn = $('bulkGo');
     btn.disabled = true;
     let ok = 0;
     const now = new Date().toISOString();
-    if (inserts.length) {
-      const { error } = await sb.from('students').insert(inserts.map(x => ({ ...x, updated_at: now })));
-      if (error) { toast('새 학생을 등록하지 못했습니다: ' + dbMsg(error)); btn.disabled = false; return; }
-      ok += inserts.length;
+    /* 한 명씩 넣어서, 다른 선생님 담당 학생과 겹치는 줄만 건너뜁니다 */
+    for (const x of inserts) {
+      const { error } = await sb.from('students').insert({ ...x, updated_at: now });
+      if (error) problems.push(x.sid || x.name); else ok++;
+      $('bulkMsg').textContent = `${ok}명 반영 중`;
     }
     for (const u of updates) {
       const { error } = await sb.from('students').update({ ...u.patch, updated_at: now }).eq('id', u.id);
@@ -1295,7 +1302,7 @@ const Teacher = {
     await this.load();
     this.renderAll();
     if (problems.length) {
-      $('bulkMsg').textContent = `반영하지 못한 학번: ${problems.filter(Boolean).join(', ') || '이름 없는 줄'}`;
+      $('bulkMsg').textContent = `반영하지 못한 줄: ${problems.filter(Boolean).join(', ') || '이름 없는 줄'} (이미 다른 선생님 담당이거나 같은 이메일이 있을 수 있어요)`;
       toast(`${ok}명 반영, ${problems.length}줄은 확인이 필요합니다.`);
     } else {
       this.closeModal('mBulk');
