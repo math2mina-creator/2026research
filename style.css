@@ -368,3 +368,10 @@ img.sig{display:block;margin-top:6px;max-width:240px;width:100%;background:#fff;
 .assign-list input{width:16px;height:16px;flex:none}
 .assign-list .tch{margin-left:auto}
 #roleLine b{color:var(--ink)}
+
+/* pick teacher */
+.pick-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin:6px 0 14px}
+.pick-item{display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--surface);border:1.5px solid var(--line);border-radius:10px;cursor:pointer;font-weight:600;font-size:16px}
+.pick-item:hover{border-color:var(--ink-3)}
+.pick-item.on{border-color:var(--blue);background:var(--blue-bg);color:var(--blue)}
+.pick-item input{width:18px;height:18px;flex:none}

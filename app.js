@@ -1329,8 +1329,43 @@ const Student = {
     try { await this.load(); }
     catch (e) { renderMessage(email, '정보를 불러오지 못했습니다.', esc(dbMsg(e))); return; }
     if (!hasConsent(this.me)) { this.renderConsent(); return; }
+    if (!this.me.teacher_email && await this.renderPickTeacher()) return;
     this.render();
     this.markSeen();
+  },
+
+  /* 처음 한 번 담당 선생님 고르기. 화면을 그렸으면 true */
+  async renderPickTeacher() {
+    const { data, error } = await sb.rpc('teacher_choices');
+    if (error || !data || !data.length) return false;
+    const me = this.me;
+    app.innerHTML = `${topBar(this.email)}
+      <div class="consent pick">
+        <h1>담당 선생님 선택</h1>
+        <p class="sub">${esc(me.name)} 학생, 개인연구를 지도받을 담당 선생님을 골라 주세요. 선생님이 제출물을 확인하고 피드백을 남겨 줍니다.</p>
+        <div class="pick-list" role="radiogroup" aria-label="담당 선생님">
+          ${data.map(t => `<label class="pick-item"><input type="radio" name="pickT" value="${esc(t.email)}"><span>${esc(t.name)} 선생님</span></label>`).join('')}
+        </div>
+        <p class="hint">한 번 고르면 직접 바꿀 수 없어요. 잘못 골랐다면 선생님께 말씀드리면 바꿔 주십니다.</p>
+        <div class="consent-actions"><button class="btn primary" id="pickGo" disabled>이 선생님으로 정하기</button></div>
+      </div>`;
+    bindLogout();
+    app.querySelectorAll('input[name="pickT"]').forEach(r => r.onchange = () => {
+      $('pickGo').disabled = false;
+      app.querySelectorAll('.pick-item').forEach(l => l.classList.toggle('on', l.querySelector('input').checked));
+    });
+    $('pickGo').onclick = async () => {
+      const sel = app.querySelector('input[name="pickT"]:checked');
+      if (!sel) return;
+      $('pickGo').disabled = true;
+      const { error: e2 } = await sb.rpc('choose_my_teacher', { p_email: sel.value });
+      if (e2) { toast(e2.message || '저장하지 못했습니다. 다시 눌러 주세요.'); $('pickGo').disabled = false; return; }
+      try { await this.load(); } catch (e) { this.me.teacher_email = sel.value; }
+      this.render();
+      this.markSeen();
+      toast('담당 선생님을 정했습니다. 이제 제출할 수 있습니다.');
+    };
+    return true;
   },
 
   /* 손글씨 서명란: 흰 종이 위 검은 펜 */
@@ -1422,6 +1457,7 @@ const Student = {
       try { await this.load(); } catch (e) { /* 아래에서 화면만 다시 그림 */ }
       this.me.consent_at = this.me.consent_at || new Date().toISOString();
       this.me.consent_version = CONSENT_VERSION;
+      if (!this.me.teacher_email && await this.renderPickTeacher()) { toast('동의했습니다. 담당 선생님을 골라 주세요.'); return; }
       this.render();
       this.markSeen();
       toast('동의했습니다. 이제 제출할 수 있습니다.');
