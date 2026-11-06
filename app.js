@@ -386,6 +386,7 @@ const Teacher = {
       </select>
       <span class="spacer"></span>
       <button class="btn" id="bReload">새로고침</button>
+      <button class="btn" id="bAnn">공지사항</button>
       <button class="btn admin-only" id="bAssign">담당 배정</button>
       <button class="btn admin-only" id="bTpl">양식 관리</button>
       <button class="btn" id="bBulk">명단 붙여넣기</button>
@@ -480,6 +481,25 @@ const Teacher = {
       <div class="mfoot"><span class="msg" id="asMsg"></span><button class="btn" data-close="mAssign">취소</button><button class="btn primary" id="asGo">저장</button></div>
     </div></div>
 
+    <div class="modal" id="mAnn" role="dialog" aria-modal="true" aria-labelledby="mAnnT"><div class="mbox wide">
+      <h2 id="mAnnT">공지사항</h2>
+      <p id="annIntro"></p>
+      <div class="ann-form">
+        <div class="field"><label class="l" for="annTitle">제목</label><input class="in" id="annTitle" maxlength="200" placeholder="예: 서론 제출 마감 안내"></div>
+        <div class="field"><label class="l" for="annBody">내용</label><textarea class="in" id="annBody" rows="5" maxlength="5000" placeholder="학생들에게 전할 내용을 적으세요."></textarea></div>
+        <div class="tpl-pick">
+          <select class="in" id="annAud" style="flex:0 1 200px"><option value="mine">내 담당 학생에게</option><option value="all">전체 학생에게</option></select>
+          <label class="agree small" style="margin:0"><input type="checkbox" id="annPin"> <span>맨 위에 고정</span></label>
+          <span class="spacer"></span>
+          <button class="btn" id="annCancel" hidden>수정 취소</button>
+          <button class="btn primary" id="annGo">게시</button>
+        </div>
+      </div>
+      <h3 class="rv-h" style="margin-top:18px" id="annListT">게시한 공지</h3>
+      <ul class="ann-list" id="annList"></ul>
+      <div class="mfoot"><button class="btn" data-close="mAnn">닫기</button></div>
+    </div></div>
+
     <div class="review" id="review" role="dialog" aria-modal="true" aria-label="제출물 보면서 피드백 쓰기" aria-hidden="true">
       <div class="rv-head">
         <div class="rv-title"><b id="rvName"></b><span id="rvMeta"></span></div>
@@ -512,6 +532,9 @@ const Teacher = {
     $('tGo').onclick = () => this.uploadTemplate();
     $('teachAdd').onclick = () => this.addTeacher();
     $('bAssign').onclick = () => this.openAssign();
+    $('bAnn').onclick = () => this.openAnn();
+    $('annGo').onclick = () => this.saveAnn();
+    $('annCancel').onclick = () => this.resetAnnForm();
     $('bBulk').addEventListener('click', () => {
       const note = $('bulkNote');
       if (note) note.textContent = this.isAdmin ? '' : '여기서 등록한 학생은 자동으로 선생님 담당 학생이 됩니다.';
@@ -1183,6 +1206,81 @@ const Teacher = {
     this.loadTeachers();
   },
 
+  /* ----- 공지사항 ----- */
+  anns: [], annEdit: null,
+
+  async openAnn() {
+    $('annIntro').textContent = this.isAdmin
+      ? '‘내 담당 학생에게’ 공지는 선생님 담당 학생에게만, ‘전체 학생에게’ 공지는 모든 학생 화면 맨 위에 보입니다.'
+      : '여기에 쓴 공지는 선생님 담당 학생들의 화면 맨 위에 보입니다.';
+    $('annAud').hidden = !this.isAdmin;
+    $('annListT').textContent = this.isAdmin ? '게시된 공지 (모든 선생님)' : '내가 게시한 공지';
+    this.resetAnnForm();
+    this.openModal('mAnn');
+    await this.loadAnns();
+  },
+
+  resetAnnForm() {
+    this.annEdit = null;
+    $('annTitle').value = ''; $('annBody').value = ''; $('annPin').checked = false; $('annAud').value = 'mine';
+    $('annGo').textContent = '게시';
+    $('annCancel').hidden = true;
+  },
+
+  async loadAnns() {
+    const list = $('annList');
+    const { data, error } = await sb.from('announcements').select('*').order('created_at', { ascending: false });
+    if (error) { list.innerHTML = `<li class="hint">공지를 불러오지 못했습니다. ${esc(dbMsg(error))}</li>`; return; }
+    this.anns = data || [];
+    if (!this.anns.length) { list.innerHTML = '<li class="hint">아직 게시한 공지가 없습니다.</li>'; return; }
+    const sorted = [...this.anns].sort((a, b) => (b.pinned - a.pinned) || b.created_at.localeCompare(a.created_at));
+    list.innerHTML = sorted.map(a => `<li>
+      <div class="ann-meta">
+        <span class="tpl-place">${a.audience === 'all' ? '전체 학생' : esc(a.teacher_email === this.email ? '내 담당 학생' : (a.author_name || this.tName(a.teacher_email)) + ' 선생님 담당')}</span>
+        ${a.pinned ? '<span class="tpl-place pin">고정</span>' : ''}
+        <span class="hint">${fmtDT(a.created_at)}${a.updated_at && a.updated_at > a.created_at ? ' (수정됨)' : ''}${a.teacher_email !== this.email ? ` · ${esc(a.author_name || this.tName(a.teacher_email))}` : ''}</span>
+        <span class="spacer"></span>
+        <button class="btn sm" data-annedit="${esc(a.id)}">수정</button>
+        <button class="btn sm danger" data-anndel="${esc(a.id)}">삭제</button>
+      </div>
+      <b class="ann-title">${esc(a.title)}</b>
+      ${a.body ? `<div class="ann-body">${esc(a.body)}</div>` : ''}
+    </li>`).join('');
+    list.querySelectorAll('[data-annedit]').forEach(b => b.onclick = () => {
+      const a = this.anns.find(x => x.id === b.dataset.annedit);
+      this.annEdit = a.id;
+      $('annTitle').value = a.title; $('annBody').value = a.body || ''; $('annPin').checked = !!a.pinned; $('annAud').value = a.audience;
+      $('annGo').textContent = '수정 저장';
+      $('annCancel').hidden = false;
+      $('annTitle').focus();
+    });
+    list.querySelectorAll('[data-anndel]').forEach(b => b.onclick = async () => {
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = '정말 삭제'; setTimeout(() => { if (b.isConnected) { b.classList.remove('armed'); b.textContent = '삭제'; } }, 3000); return; }
+      const { error: e2 } = await sb.from('announcements').delete().eq('id', b.dataset.anndel);
+      if (e2) { toast(dbMsg(e2)); return; }
+      if (this.annEdit === b.dataset.anndel) this.resetAnnForm();
+      toast('공지를 삭제했습니다.');
+      this.loadAnns();
+    });
+  },
+
+  async saveAnn() {
+    const title = $('annTitle').value.trim();
+    const body = $('annBody').value.trim();
+    if (!title) { toast('제목을 입력하세요.'); $('annTitle').focus(); return; }
+    const audience = this.isAdmin ? $('annAud').value : 'mine';
+    const row = { title, body, pinned: $('annPin').checked, audience, updated_at: new Date().toISOString() };
+    $('annGo').disabled = true;
+    let error;
+    if (this.annEdit) ({ error } = await sb.from('announcements').update(row).eq('id', this.annEdit));
+    else ({ error } = await sb.from('announcements').insert({ ...row, teacher_email: this.email, author_name: this.tName(this.email) }));
+    $('annGo').disabled = false;
+    if (error) { toast(dbMsg(error)); return; }
+    toast(this.annEdit ? '공지를 수정했습니다.' : (audience === 'all' ? '전체 학생에게 공지를 게시했습니다.' : '담당 학생들에게 공지를 게시했습니다.'));
+    this.resetAnnForm();
+    this.loadAnns();
+  },
+
   /* ----- 담당 배정 ----- */
   openAssign() {
     const sel = $('asTeacher');
@@ -1544,6 +1642,8 @@ const Student = {
     if (bad) throw bad.error;
     const [me, subs, events, set, tpls] = res.map(r => r.data);
     this.templates = tpls || [];
+    const an = await sb.from('announcements').select('*').order('created_at', { ascending: false });
+    this.anns = an.error ? [] : (an.data || []);
     const tn = await sb.rpc('my_teacher_name');
     this.teacherName = tn.error ? '' : (tn.data || '');
     if (me) this.me = me;
@@ -1557,6 +1657,23 @@ const Student = {
   markSeen() {
     if (!this.unseen || !this.unseen.size) return;
     sb.rpc('mark_feedback_seen').then(({ error }) => { if (error) console.warn(error); });
+  },
+
+  annHTML() {
+    const list = [...(this.anns || [])].sort((a, b) => (b.pinned - a.pinned) || b.created_at.localeCompare(a.created_at));
+    if (!list.length) return '';
+    const isNew = a => Date.now() - new Date(a.updated_at || a.created_at) < 3 * 86400000;
+    const item = (a, i) => `<details class="ann" ${i === 0 || a.pinned ? 'open' : ''}>
+      <summary>${a.pinned ? '<span class="ann-pin">📌</span>' : ''}<span class="ann-t">${esc(a.title)}</span>${isNew(a) ? '<span class="newb">새 공지</span>' : ''}
+        <span class="ann-by">${a.audience === 'all' ? '전체 공지' : esc(a.author_name || '담당') + ' 선생님'} · ${fmtDate(a.created_at)}</span></summary>
+      ${a.body ? `<div class="ann-body">${esc(a.body)}</div>` : ''}
+    </details>`;
+    const shown = list.slice(0, 3), more = list.slice(3);
+    return `<section class="ann-board" aria-label="공지사항">
+      <h2>공지사항</h2>
+      ${shown.map(item).join('')}
+      ${more.length ? `<div class="ann-more" hidden>${more.map((a, i) => item(a, i + 3)).join('')}</div><button class="linkbtn" id="annMore">이전 공지 ${more.length}개 더 보기</button>` : ''}
+    </section>`;
   },
 
   progressHTML() {
@@ -1688,6 +1805,7 @@ const Student = {
         <p class="sub">${esc(me.sid || '')}${me.cls ? ` · ${esc(me.cls)}반` : ''} · ${esc(this.settings.program_name || '개인연구')}${this.teacherName ? ` · 담당 <b>${esc(this.teacherName)}</b> 선생님` : ''}</p>
         <div class="me-topic" id="topicBox">${this.topicView()}</div>
       </div></header>
+      ${this.annHTML()}
       ${this.progressHTML()}
       ${this.tplLinks('all', true)}
       <h2 class="group-title">연구계획서 <span>연구 주제, 연구 목적, 연구 방법과 일정을 담은 계획서를 한글 파일로 올리세요.</span></h2>
@@ -1702,6 +1820,8 @@ const Student = {
     bindLogout();
     app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
     this.bindTopic();
+    const am = $('annMore');
+    if (am) am.onclick = () => { app.querySelector('.ann-more').hidden = false; am.remove(); };
     app.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {
       const card = app.querySelector(`.card[data-stage="${b.dataset.goto}"]`);
       if (!card) return;
