@@ -295,3 +295,6 @@ img.sig{display:block;margin-top:6px;max-width:240px;width:100%;background:#fff;
 .part-row.extra-row{grid-template-columns:96px 1fr 44px;margin-top:4px;padding-top:6px;border-top:1px dashed var(--line)}
 .agree.small{margin:0 0 12px;font-weight:400;font-size:14px}
 .agree.small input{width:16px;height:16px;margin-top:3px}
+.chip.out{margin-left:6px}
+.row2.eq{grid-template-columns:1fr 1fr}
+@media (max-width:820px){.row2.eq{grid-template-columns:1fr}}
