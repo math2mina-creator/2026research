@@ -16,12 +16,17 @@ const STAGES = [
   { key: 'plan', label: '연구계획서', full: '연구계획서', due: 'plan_due', group: 'plan' },
   { key: 'intro', label: '서론', full: '최종보고서 1. 서론', desc: '연구 주제 선정 이유, 연구 주제와 관련된 연구 동향 분석', due: 'report_due', group: 'report' },
   { key: 'body', label: '본론', full: '최종보고서 2. 본론', desc: '연구 내용 설명', due: 'report_due', group: 'report' },
-  { key: 'conclusion', label: '결론', full: '최종보고서 3. 결론', desc: '보고서 결론', due: 'report_due', group: 'report' }
+  { key: 'conclusion', label: '결론', full: '최종보고서 3. 결론', desc: '보고서 결론', due: 'report_due', group: 'report' },
+  { key: 'extra', label: '개인연구', full: '개인연구보고서', desc: '실험 대상 학생 추가 제출', due: 'extra_due', group: 'extra' }
 ];
+/* 개인연구보고서는 '제출 대상'으로 표시된 학생에게만 해당 */
+const applies = (s, g) => g.group !== 'extra' || !!(s && s.extra_required);
+const stagesFor = s => STAGES.filter(g => applies(s, g));
+const EXTRA = STAGES.find(g => g.key === 'extra');
 const PARTS = STAGES.filter(g => g.group === 'report');
 const stageMap = () => Object.fromEntries(STAGES.map(g => [g.key, '']));
 const evMap = () => Object.fromEntries(STAGES.map(g => [g.key, []]));
-const DUES = [{ key: 'plan_due', label: '연구계획서' }, { key: 'report_due', label: '최종보고서' }];
+const DUES = [{ key: 'plan_due', label: '연구계획서' }, { key: 'report_due', label: '최종보고서' }, { key: 'extra_due', label: '개인연구보고서', extra: true }];
 const ST = {
   none: { label: '미제출', color: 'var(--none)' },
   waiting: { label: '피드백 대기', color: 'var(--blue)' },
@@ -303,6 +308,7 @@ const Teacher = {
         <option value="alldone">모두 확인 완료</option>
         <option value="nomail">이메일 미등록</option>
         <option value="noconsent">개인정보 동의 전</option>
+        <option value="extra">개인연구보고서 대상</option>
       </select>
       <select class="f" id="fsort" aria-label="정렬">
         <option value="sid">학번순</option><option value="name">이름순</option><option value="recent">최근 활동순</option>
@@ -345,6 +351,9 @@ const Teacher = {
       <div class="row2">
         <div class="field"><label class="l" for="sPlan">계획서 마감일</label><input class="in" id="sPlan" type="date"></div>
         <div class="field"><label class="l" for="sReport">최종보고서 마감일</label><input class="in" id="sReport" type="date"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label class="l" for="sExtra">개인연구보고서 마감일</label><input class="in" id="sExtra" type="date"></div>
       </div>
       <div class="mfoot"><button class="btn" data-close="mSet">취소</button><button class="btn primary" id="setGo">설정 저장</button></div>
     </div></div>
@@ -418,7 +427,8 @@ const Teacher = {
     const c = this.settings;
     $('title').textContent = c.program_name || '개인연구 제출·피드백 관리';
     document.title = $('title').textContent;
-    $('dues').innerHTML = DUES.map(g => c[g.key]
+    const anyExtra = [...this.students.values()].some(s => s.extra_required);
+    $('dues').innerHTML = DUES.filter(g => !g.extra || anyExtra).map(g => c[g.key]
       ? `<span>${g.label} 마감 <b>${fmtDate(c[g.key])}</b>${ddayTag(c[g.key])}</span>`
       : `<span>${g.label} 마감 <b>미정</b></span>`).join('') + '<button class="linkbtn" id="bSet">마감일 설정</button>';
     $('bSet').onclick = () => this.openSettings();
@@ -435,10 +445,12 @@ const Teacher = {
     const allIn = list.filter(s => PARTS.every(g => s[g.key].status !== 'none')).length;
     html += `<div class="sum"><h2>최종보고서</h2><div class="big">${allIn}<small>/ ${n}명 세 부분 모두 제출</small></div>
       <div class="parts">${PARTS.map(g => { const c = count(g.key); return `<div class="part-row"><span class="pl">${g.label}</span>${bar(c, true)}<span class="pn">${n - c.none}/${n}</span></div>`; }).join('')}</div>
+      ${(() => { const ex = list.filter(s => s.extra_required); if (!ex.length) return ''; const c = { none: 0, waiting: 0, revise: 0, done: 0 }; ex.forEach(s => c[s.extra.status || 'none']++); const m = ex.length;
+        return `<div class="part-row extra-row"><span class="pl">개인연구보고서</span><div class="bar thin">${ORDER.filter(k => k !== 'none').map(k => c[k] ? `<span style="width:${c[k] / m * 100}%;background:${ST[k].color}"></span>` : '').join('')}</div><span class="pn">${m - c.none}/${m}</span></div>`; })()}
       <div class="legend">${ORDER.filter(k => k !== 'none').map(k => `<span><i style="background:${ST[k].color}"></i>${ST[k].label}</span>`).join('')}</div></div>`;
-    const wait = list.reduce((a, s) => a + STAGES.filter(g => s[g.key].status === 'waiting').length, 0);
-    const rev = list.reduce((a, s) => a + STAGES.filter(g => s[g.key].status === 'revise').length, 0);
-    const late = list.filter(s => STAGES.some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]))).length;
+    const wait = list.reduce((a, s) => a + stagesFor(s).filter(g => s[g.key].status === 'waiting').length, 0);
+    const rev = list.reduce((a, s) => a + stagesFor(s).filter(g => s[g.key].status === 'revise').length, 0);
+    const late = list.filter(s => stagesFor(s).some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]))).length;
     const nomail = list.filter(s => !s.email).length;
     const noconsent = list.filter(s => s.email && !hasConsent(s)).length;
     html += `<div class="sum"><h2>지금 할 일</h2><div class="todo-list">
@@ -470,12 +482,13 @@ const Teacher = {
     const c = $('fcls').value;
     if (c && String(s.cls) !== c) return false;
     const f = $('fstatus').value;
-    if (f === 'wait') return STAGES.some(g => s[g.key].status === 'waiting');
-    if (f === 'revise') return STAGES.some(g => s[g.key].status === 'revise');
+    if (f === 'wait') return stagesFor(s).some(g => s[g.key].status === 'waiting');
+    if (f === 'revise') return stagesFor(s).some(g => s[g.key].status === 'revise');
+    if (f === 'extra') return !!s.extra_required;
     if (f === 'plan-none') return s.plan.status === 'none';
     if (f === 'report-none') return PARTS.some(g => s[g.key].status === 'none');
-    if (f === 'late') return STAGES.some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]));
-    if (f === 'alldone') return STAGES.every(g => s[g.key].status === 'done');
+    if (f === 'late') return stagesFor(s).some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]));
+    if (f === 'alldone') return stagesFor(s).every(g => s[g.key].status === 'done');
     if (f === 'nomail') return !s.email;
     if (f === 'noconsent') return !!s.email && !hasConsent(s);
     return true;
@@ -487,10 +500,12 @@ const Teacher = {
       const k = s[g.key].status || 'none';
       return `<span class="chip ${k}${this.justStamped === s.id + g.key ? ' pressed' : ''}" title="${g.full}: ${ST[k].label}">${k === 'done' ? '✓ ' : ''}${g.label}</span>`;
     }).join('');
+    const ek = s.extra_required ? (s.extra.status || 'none') : null;
+    const extraChip = ek ? `<span class="chip ${ek} extra${this.justStamped === s.id + 'extra' ? ' pressed' : ''}" title="개인연구보고서: ${ST[ek].label}">${ek === 'done' ? '✓ ' : ''}개인연구</span>` : '';
     const missing = PARTS.filter(g => s[g.key].status === 'none').length;
     const meta = missing && isPast(due) ? '<div class="meta warn">마감 지남</div>'
-      : PARTS.some(g => s[g.key].status === 'waiting') ? '<div class="meta">피드백 대기 있음</div>' : '';
-    return `<div class="chips">${chips}</div>${meta}`;
+      : [...PARTS, ...(s.extra_required ? [EXTRA] : [])].some(g => s[g.key].status === 'waiting') ? '<div class="meta">피드백 대기 있음</div>' : '';
+    return `<div class="chips">${chips}${extraChip}</div>${meta}`;
   },
 
   stageCell(s, g) {
@@ -594,8 +609,8 @@ const Teacher = {
         ${e.kind !== 'submit' ? `<button class="del" data-del="${esc(e.id)}" aria-label="이 기록 삭제">삭제</button>` : ''}</div>${body}</li>`;
     }).join('');
     return `<section class="stage" data-stage="${g.key}">
-      ${g.key === PARTS[0].key ? '<h3 class="group-h">최종보고서</h3>' : ''}
-      <div class="stage-h"><h3>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.label}${g.desc ? `<small class="desc">${g.desc}</small>` : ''}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
+      ${g.key === PARTS[0].key ? '<h3 class="group-h">최종보고서</h3>' : ''}${g.key === 'extra' ? '<h3 class="group-h">개인연구보고서</h3>' : ''}
+      <div class="stage-h"><h3>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.group === 'extra' ? '제출물' : g.label}${g.desc ? `<small class="desc">${g.desc}</small>` : ''}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
       ${st.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(st.file_name || '제출 파일')}</span><button class="btn sm primary" data-review="${g.key}">보면서 피드백 쓰기</button></div>` : ''}
       <div class="seg" role="radiogroup" aria-label="${g.label} 상태">
         ${['none', 'waiting', 'revise', 'done'].map(s => `<label class="${k === s ? 'sel-' + s : ''}"><input type="radio" name="st-${g.key}" value="${s}" ${k === s ? 'checked' : ''}><span>${ST[s].label}</span></label>`).join('')}
@@ -623,10 +638,12 @@ const Teacher = {
       </div>
       <div class="field"><label class="l" for="f-email">학교 구글 이메일 (학생 로그인용)</label><input class="in" id="f-email" data-k="email" type="email" autocomplete="off" value="${esc(d.email)}"></div>
       <div class="field"><label class="l" for="f-topic">연구 주제</label><input class="in" id="f-topic" data-k="topic" value="${esc(d.topic)}"></div>
+      <label class="agree small"><input type="checkbox" id="f-extra" ${d.extra_required ? 'checked' : ''}> <span>실험 대상 학생 (개인연구보고서 추가 제출)</span></label>
       ${this.isNew ? '' : `<p class="hint" style="margin:-4px 0 12px">개인정보 수집·이용 동의: ${hasConsent(d) ? fmtDT(d.consent_at) + ' 동의함' + (/^data:image\/png;base64,/.test(d.consent_signature || '') ? `<br><img class="sig" src="${d.consent_signature}" alt="${esc(d.name)} 학생 서명">` : '') : '<span class="warn">아직 동의하지 않음</span> (학생이 처음 로그인할 때 동의 화면이 나옵니다)'}</p>`}
       <div class="field"><label class="l" for="f-memo">지도 메모 (학생에게 보이지 않음)</label><textarea class="in" id="f-memo" data-k="memo" rows="3">${esc(d.memo)}</textarea></div>
-      ${STAGES.map(g => this.stageHTML(g)).join('')}`;
+      ${stagesFor(d).map(g => this.stageHTML(g)).join('')}`;
     this.bindDrawer();
+    $('f-extra').onchange = () => { this.keepFb(); this.draft.extra_required = $('f-extra').checked; this.setDirty(); this.renderDrawer(); };
     this.updateFoot();
   },
 
@@ -678,7 +695,8 @@ const Teacher = {
       cls: String(d.cls || '').trim().replace(/반$/, '') || null,
       email: d.email.trim().toLowerCase() || null,
       field: d.field.trim(),
-      topic: d.topic.trim()
+      topic: d.topic.trim(),
+      extra_required: !!d.extra_required
     };
     if (!row.name) { toast('이름을 입력하세요.'); $('f-name').focus(); return; }
     if (row.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) { toast('이메일 형식을 확인하세요.'); $('f-email').focus(); return; }
@@ -694,7 +712,7 @@ const Teacher = {
         if (error) throw error;
         id = data.id;
       } else {
-        const changed = ['sid', 'name', 'cls', 'email', 'field', 'topic'].some(k => (row[k] || '') !== (o[k] || ''));
+        const changed = ['sid', 'name', 'cls', 'email', 'field', 'topic'].some(k => (row[k] || '') !== (o[k] || '')) || row.extra_required !== !!o.extra_required;
         if (changed) {
           const { error } = await sb.from('students').update({ ...row, updated_at: now }).eq('id', id);
           if (error) throw error;
@@ -999,10 +1017,11 @@ const Teacher = {
     $('sName').value = this.settings.program_name || '';
     $('sPlan').value = this.settings.plan_due || '';
     $('sReport').value = this.settings.report_due || '';
+    $('sExtra').value = this.settings.extra_due || '';
     this.openModal('mSet');
   },
   async saveSettings() {
-    const c = { program_name: $('sName').value.trim() || null, plan_due: $('sPlan').value || null, report_due: $('sReport').value || null };
+    const c = { program_name: $('sName').value.trim() || null, plan_due: $('sPlan').value || null, report_due: $('sReport').value || null, extra_due: $('sExtra').value || null };
     const { error } = await sb.from('settings').update(c).eq('id', 1);
     if (error) { toast(dbMsg(error)); return; }
     this.settings = { ...this.settings, ...c };
@@ -1017,7 +1036,7 @@ const Teacher = {
     const list = [...this.students.values()].sort((a, b) => (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }));
     const lines = [head.map(q).join(',')].concat(list.map(s => [
       s.sid, s.name, s.cls, s.email, s.field, s.topic,
-      ...STAGES.flatMap(g => [ST[s[g.key].status].label, dateOf(s[g.key].submitted_at), lastNote(s.ev[g.key])]), hasConsent(s) ? dateOf(s.consent_at) : '', s.memo
+      ...STAGES.flatMap(g => applies(s, g) ? [ST[s[g.key].status].label, dateOf(s[g.key].submitted_at), lastNote(s.ev[g.key])] : ['해당 없음', '', '']), hasConsent(s) ? dateOf(s.consent_at) : '', s.memo
     ].map(q).join(',')));
     const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -1183,8 +1202,8 @@ const Student = {
       return `<li class="k-status"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>상태가 바뀌었습니다</span>${e.status ? `<span class="pill ${e.status}">${ST[e.status].label}</span>` : ''}</div></li>`;
     }).join('');
     return `<section class="card" data-stage="${g.key}">
-      <div class="card-h"><h2>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.label}</h2>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
-      <p class="due">${g.desc ? `<b>${g.desc}</b><br>` : ''}${due ? `마감 ${fmtDate(due)}${ddayTag(due)}` : '마감일 미정'}</p>
+      <div class="card-h"><h2>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.full}</h2>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
+      <p class="due">${g.desc && g.group === 'report' ? `<b>${g.desc}</b><br>` : ''}${due ? `마감 ${fmtDate(due)}${ddayTag(due)}` : '마감일 미정'}</p>
       <div class="status-line"><span class="pill ${k}">${ST[k].label}</span>${sub.submitted_at ? `<span class="hint">${fmtDT(sub.submitted_at)} 제출</span>` : ''}</div>
       <p class="hint" style="margin-bottom:12px">${guide}</p>
       ${sub.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(sub.file_name || '제출 파일')}</span><button class="btn sm" data-open="${esc(sub.file_path)}">열기</button></div>` : ''}
@@ -1207,7 +1226,9 @@ const Student = {
       </div></header>
       <div class="cards one">${this.card(STAGES[0])}</div>
       <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요${this.settings.report_due ? ` · 마감 ${fmtDate(this.settings.report_due)}` : ''}</span></h2>
-      <div class="cards three">${PARTS.map(g => this.card(g)).join('')}</div>`;
+      <div class="cards three">${PARTS.map(g => this.card(g)).join('')}</div>
+      ${me.extra_required ? `<h2 class="group-title">개인연구보고서 <span>실험 대상 학생은 개인연구보고서도 한글 파일로 제출하세요</span></h2>
+      <div class="cards one">${this.card(EXTRA)}</div>` : ''}`;
     bindLogout();
     app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
     app.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => app.querySelector(`[data-file="${b.dataset.pick}"]`).click());
