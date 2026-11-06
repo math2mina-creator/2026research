@@ -587,7 +587,7 @@ const Teacher = {
     });
     $('rows').innerHTML = list.map(s => `<tr data-id="${esc(s.id)}" tabindex="0">
       <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${!s.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(s) ? '' : '<span class="nomail">동의 전</span>'}</td>
-      <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${esc(s.topic) || '주제 미정'}</div></td>
+      <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${s.topic_updated_at && (Date.now() - new Date(s.topic_updated_at)) < 7 * 86400000 ? '<span class="tnew">학생 수정</span>' : ''}${esc(s.topic) || '주제 미정'}</div></td>
       <td class="c-report">${this.partsCell(s)}</td>
       <td class="c-recent"><span class="recent">${rel(this.lastActivity(s))}</span></td></tr>`).join('');
     this.justStamped = null;
@@ -691,7 +691,8 @@ const Teacher = {
         <div class="field"><label class="l" for="f-field">연구 분야</label><input class="in" id="f-field" data-k="field" placeholder="예: 건축, 수학" value="${esc(d.field)}"></div>
       </div>
       <div class="field"><label class="l" for="f-email">학교 구글 이메일 (학생 로그인용)</label><input class="in" id="f-email" data-k="email" type="email" autocomplete="off" value="${esc(d.email)}"></div>
-      <div class="field"><label class="l" for="f-topic">연구 주제</label><input class="in" id="f-topic" data-k="topic" value="${esc(d.topic)}"></div>
+      <div class="field"><label class="l" for="f-topic">연구 주제</label><input class="in" id="f-topic" data-k="topic" value="${esc(d.topic)}">
+        ${d.topic_updated_at ? `<p class="hint">학생이 ${fmtDT(d.topic_updated_at)}에 수정함${d.topic_prev ? ` · 이전 주제: ${esc(d.topic_prev)}` : ''}</p>` : ''}</div>
       <label class="agree small"><input type="checkbox" id="f-extra" ${d.extra_required ? 'checked' : ''}> <span>실험 대상 학생 (개인연구보고서 추가 제출)</span></label>
       ${this.isNew ? '' : `<p class="hint" style="margin:-4px 0 12px">개인정보 수집·이용 동의: ${hasConsent(d) ? fmtDT(d.consent_at) + ' 동의함' + (/^data:image\/png;base64,/.test(d.consent_signature || '') ? `<br><img class="sig" src="${d.consent_signature}" alt="${esc(d.name)} 학생 서명">` : '') : '<span class="warn">아직 동의하지 않음</span> (학생이 처음 로그인할 때 동의 화면이 나옵니다)'}</p>`}
       <div class="field"><label class="l" for="f-memo">지도 메모 (학생에게 보이지 않음)</label><textarea class="in" id="f-memo" data-k="memo" rows="3">${esc(d.memo)}</textarea></div>
@@ -1291,6 +1292,43 @@ const Student = {
     sb.rpc('mark_feedback_seen').then(({ error }) => { if (error) console.warn(error); });
   },
 
+  topicView() {
+    const t = this.me.topic;
+    return t
+      ? `<span>연구 주제: <b>${esc(t)}</b></span> <button class="linkbtn" id="tEdit">수정</button>`
+      : `<span>연구 주제가 아직 등록되지 않았습니다.</span> <button class="linkbtn" id="tEdit">연구 주제 입력</button>`;
+  },
+
+  bindTopic() {
+    const box = $('topicBox');
+    const edit = $('tEdit');
+    if (!edit) return;
+    edit.onclick = () => {
+      box.innerHTML = `<label class="l" for="tInput">연구 주제</label>
+        <textarea class="in" id="tInput" rows="2" maxlength="300">${esc(this.me.topic || '')}</textarea>
+        <div class="topic-actions"><span class="hint" id="tCount"></span><button class="btn" id="tCancel">취소</button><button class="btn primary" id="tSave">저장</button></div>`;
+      const ta = $('tInput');
+      const count = () => { $('tCount').textContent = `${ta.value.trim().length} / 300자`; };
+      count();
+      ta.oninput = count;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+      $('tCancel').onclick = () => { box.innerHTML = this.topicView(); this.bindTopic(); };
+      $('tSave').onclick = async () => {
+        const v = ta.value.trim();
+        if (!v) { toast('연구 주제를 입력하세요.'); ta.focus(); return; }
+        if (v === (this.me.topic || '')) { box.innerHTML = this.topicView(); this.bindTopic(); return; }
+        $('tSave').disabled = true;
+        const { error } = await sb.rpc('update_my_topic', { p_topic: v });
+        if (error) { toast(error.message || '연구 주제를 저장하지 못했습니다.'); $('tSave').disabled = false; return; }
+        this.me.topic = v;
+        box.innerHTML = this.topicView();
+        this.bindTopic();
+        toast('연구 주제를 수정했습니다. 선생님 화면에도 바로 반영됩니다.');
+      };
+    };
+  },
+
   tplLinks(stage, big) {
     const ts = (this.templates || []).filter(t => t.stage === stage);
     if (!ts.length) return '';
@@ -1338,7 +1376,7 @@ const Student = {
       <header class="top"><div>
         <h1>${esc(me.name)}</h1>
         <p class="sub">${esc(me.sid || '')}${me.cls ? ` · ${esc(me.cls)}반` : ''} · ${esc(this.settings.program_name || '개인연구')}</p>
-        <p class="me-topic">${me.topic ? '연구 주제: ' + esc(me.topic) : '연구 주제가 아직 등록되지 않았습니다.'}</p>
+        <div class="me-topic" id="topicBox">${this.topicView()}</div>
       </div></header>
       ${this.tplLinks('all', true)}
       <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요. 부분마다 마감일이 다를 수 있어요.</span></h2>
@@ -1350,6 +1388,7 @@ const Student = {
       <div class="cards one">${this.card(OUTPUT)}</div>`;
     bindLogout();
     app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
+    this.bindTopic();
     app.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => downloadTemplate(this.templates.find(t => t.id === b.dataset.tpl)));
     app.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => app.querySelector(`[data-file="${b.dataset.pick}"]`).click());
     app.querySelectorAll('[data-file]').forEach(inp => inp.onchange = () => { if (inp.files[0]) this.upload(inp.dataset.file, inp.files[0]); });
