@@ -15,7 +15,6 @@ const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg
 const ACCEPT_OUTPUT = ACCEPT + ',.gif,.webp,.mp4,.mov,.m4a,.mp3,.txt,.csv';
 const acceptFor = g => g.key === 'output' ? ACCEPT_OUTPUT : ACCEPT;
 const STAGES = [
-  { key: 'plan', label: '연구계획서', full: '연구계획서', due: 'plan_due', group: 'plan' },
   { key: 'intro', label: '서론', full: '최종보고서 1. 서론', desc: '연구 주제 선정 이유, 연구 주제와 관련된 연구 동향 분석', due: 'report_due', group: 'report' },
   { key: 'body', label: '본론', full: '최종보고서 2. 본론', desc: '연구 내용 설명', due: 'report_due', group: 'report' },
   { key: 'conclusion', label: '결론', full: '최종보고서 3. 결론', desc: '보고서 결론', due: 'report_due', group: 'report' },
@@ -25,11 +24,10 @@ const STAGES = [
 const OUTPUT = STAGES.find(g => g.key === 'output');
 /* 양식을 보여 줄 위치 */
 const TPL_PLACES = [
-  ['all', '모든 학생 공통 (학생 화면 맨 위)'], ['plan', '연구계획서'], ['report', '최종보고서 공통'],
-  ['intro', '최종보고서 1. 서론'], ['body', '최종보고서 2. 본론'], ['conclusion', '최종보고서 3. 결론'],
+  ['all', '모든 학생 공통 (학생 화면 맨 위)'], ['report', '최종보고서'],
   ['extra', '개인연구보고서 (대상 학생만)'], ['output', '산출물']
 ];
-const tplPlace = k => (TPL_PLACES.find(x => x[0] === k) || [k, k])[1];
+const tplPlace = k => (TPL_PLACES.find(x => x[0] === k) || [k, ({ plan: '연구계획서', intro: '서론', body: '본론', conclusion: '결론' })[k] + ' (이전 위치, 학생에게 안 보임)'])[1];
 async function downloadTemplate(t) {
   try { saveBlob(await downloadBlob(t.file_path), t.file_name); }
   catch (e) { toast(e && e.demo ? e.message : '양식을 내려받지 못했습니다.'); }
@@ -41,7 +39,7 @@ const EXTRA = STAGES.find(g => g.key === 'extra');
 const PARTS = STAGES.filter(g => g.group === 'report');
 const stageMap = () => Object.fromEntries(STAGES.map(g => [g.key, '']));
 const evMap = () => Object.fromEntries(STAGES.map(g => [g.key, []]));
-const DUES = [{ key: 'plan_due', label: '연구계획서' }, { key: 'report_due', label: '최종보고서' }, { key: 'extra_due', label: '개인연구보고서', extra: true }, { key: 'output_due', label: '산출물' }];
+const DUES = [{ key: 'report_due', label: '최종보고서' }, { key: 'extra_due', label: '개인연구보고서', extra: true }, { key: 'output_due', label: '산출물' }];
 const ST = {
   none: { label: '미제출', color: 'var(--none)' },
   waiting: { label: '피드백 대기', color: 'var(--blue)' },
@@ -327,7 +325,6 @@ const Teacher = {
         <option value="">전체 상태</option>
         <option value="wait">피드백 대기</option>
         <option value="revise">보완 요청 중</option>
-        <option value="plan-none">계획서 미제출</option>
         <option value="report-none">보고서 미제출 부분 있음</option>
         <option value="output-none">산출물 미제출</option>
         <option value="late">마감 지남 미제출</option>
@@ -348,7 +345,7 @@ const Teacher = {
     </div>
     <p class="count" id="count"></p>
     <div class="tablebox">
-      <table><thead><tr><th>학번·이름</th><th>연구 주제</th><th>연구계획서</th><th>최종보고서·산출물</th><th>최근 활동</th></tr></thead><tbody id="rows"></tbody></table>
+      <table><thead><tr><th>학번·이름</th><th>연구 주제</th><th>최종보고서·산출물</th><th>최근 활동</th></tr></thead><tbody id="rows"></tbody></table>
       <div id="empty"></div>
     </div>
 
@@ -375,8 +372,7 @@ const Teacher = {
     <div class="modal" id="mSet" role="dialog" aria-modal="true" aria-labelledby="mSetT"><div class="mbox">
       <h2 id="mSetT">프로그램 설정</h2>
       <div class="field"><label class="l" for="sName">프로그램 이름</label><input class="in" id="sName"></div>
-      <div class="row2">
-        <div class="field"><label class="l" for="sPlan">계획서 마감일</label><input class="in" id="sPlan" type="date"></div>
+      <div class="row2 eq">
         <div class="field"><label class="l" for="sReport">최종보고서 마감일</label><input class="in" id="sReport" type="date"></div>
       </div>
       <div class="row2 eq">
@@ -492,8 +488,7 @@ const Teacher = {
     const count = key => { const c = { none: 0, waiting: 0, revise: 0, done: 0 }; list.forEach(s => c[s[key].status || 'none']++); return c; };
     const bar = (cnt, thin) => `<div class="bar${thin ? ' thin' : ''}">${ORDER.filter(k => k !== 'none').map(k => n && cnt[k] ? `<span style="width:${cnt[k] / n * 100}%;background:${ST[k].color}" title="${ST[k].label} ${cnt[k]}명"></span>` : '').join('')}</div>`;
     const legend = cnt => `<div class="legend">${ORDER.map(k => `<span><i style="background:${ST[k].color}"></i>${ST[k].label} ${cnt[k]}</span>`).join('')}</div>`;
-    const pc = count('plan');
-    let html = `<div class="sum"><h2>연구계획서</h2><div class="big">${n - pc.none}<small>/ ${n}명 제출</small></div>${bar(pc)}${legend(pc)}</div>`;
+    let html = '';
     const allIn = list.filter(s => PARTS.every(g => s[g.key].status !== 'none')).length;
     html += `<div class="sum"><h2>최종보고서</h2><div class="big">${allIn}<small>/ ${n}명 세 부분 모두 제출</small></div>
       <div class="parts">${PARTS.map(g => { const c = count(g.key); return `<div class="part-row"><span class="pl">${g.label}</span>${bar(c, true)}<span class="pn">${n - c.none}/${n}</span></div>`; }).join('')}</div>
@@ -539,7 +534,6 @@ const Teacher = {
     if (f === 'revise') return stagesFor(s).some(g => s[g.key].status === 'revise');
     if (f === 'extra') return !!s.extra_required;
     if (f === 'output-none') return s.output.status === 'none';
-    if (f === 'plan-none') return s.plan.status === 'none';
     if (f === 'report-none') return PARTS.some(g => s[g.key].status === 'none');
     if (f === 'late') return stagesFor(s).some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]));
     if (f === 'alldone') return stagesFor(s).every(g => s[g.key].status === 'done');
@@ -589,7 +583,6 @@ const Teacher = {
     $('rows').innerHTML = list.map(s => `<tr data-id="${esc(s.id)}" tabindex="0">
       <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${!s.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(s) ? '' : '<span class="nomail">동의 전</span>'}</td>
       <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${esc(s.topic) || '주제 미정'}</div></td>
-      <td class="c-plan">${this.stageCell(s, STAGES[0])}</td>
       <td class="c-report">${this.partsCell(s)}</td>
       <td class="c-recent"><span class="recent">${rel(this.lastActivity(s))}</span></td></tr>`).join('');
     this.justStamped = null;
@@ -1122,14 +1115,13 @@ const Teacher = {
   closeModal(id) { $(id).classList.remove('on'); },
   openSettings() {
     $('sName').value = this.settings.program_name || '';
-    $('sPlan').value = this.settings.plan_due || '';
     $('sReport').value = this.settings.report_due || '';
     $('sExtra').value = this.settings.extra_due || '';
     $('sOutput').value = this.settings.output_due || '';
     this.openModal('mSet');
   },
   async saveSettings() {
-    const c = { program_name: $('sName').value.trim() || null, plan_due: $('sPlan').value || null, report_due: $('sReport').value || null, extra_due: $('sExtra').value || null, output_due: $('sOutput').value || null };
+    const c = { program_name: $('sName').value.trim() || null, report_due: $('sReport').value || null, extra_due: $('sExtra').value || null, output_due: $('sOutput').value || null };
     const { error } = await sb.from('settings').update(c).eq('id', 1);
     if (error) { toast(dbMsg(error)); return; }
     this.settings = { ...this.settings, ...c };
@@ -1342,7 +1334,6 @@ const Student = {
         <p class="me-topic">${me.topic ? '연구 주제: ' + esc(me.topic) : '연구 주제가 아직 등록되지 않았습니다.'}</p>
       </div></header>
       ${this.tplLinks('all', true)}
-      <div class="cards one">${this.card(STAGES[0])}</div>
       <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요${this.settings.report_due ? ` · 마감 ${fmtDate(this.settings.report_due)}` : ''}</span></h2>
       ${this.tplLinks('report', true)}
       <div class="cards three">${PARTS.map(g => this.card(g)).join('')}</div>
