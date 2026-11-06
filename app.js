@@ -23,6 +23,17 @@ const STAGES = [
   { key: 'output', label: '산출물', full: '산출물', desc: '연구 과정에서 만든 결과물 (사진, 발표자료, 모형·작품 사진, 영상 등)', due: 'output_due', group: 'output' }
 ];
 const OUTPUT = STAGES.find(g => g.key === 'output');
+/* 양식을 보여 줄 위치 */
+const TPL_PLACES = [
+  ['all', '모든 학생 공통 (학생 화면 맨 위)'], ['plan', '연구계획서'], ['report', '최종보고서 공통'],
+  ['intro', '최종보고서 1. 서론'], ['body', '최종보고서 2. 본론'], ['conclusion', '최종보고서 3. 결론'],
+  ['extra', '개인연구보고서 (대상 학생만)'], ['output', '산출물']
+];
+const tplPlace = k => (TPL_PLACES.find(x => x[0] === k) || [k, k])[1];
+async function downloadTemplate(t) {
+  try { saveBlob(await downloadBlob(t.file_path), t.file_name); }
+  catch (e) { toast(e && e.demo ? e.message : '양식을 내려받지 못했습니다.'); }
+}
 /* 개인연구보고서는 '제출 대상'으로 표시된 학생에게만 해당 */
 const applies = (s, g) => g.group !== 'extra' || !!(s && s.extra_required);
 const stagesFor = s => STAGES.filter(g => applies(s, g));
@@ -280,12 +291,14 @@ const Teacher = {
       sb.from('submissions').select('*'),
       sb.from('events').select('*').order('created_at', { ascending: false }),
       sb.from('teacher_notes').select('*'),
-      sb.from('settings').select('*').eq('id', 1).maybeSingle()
+      sb.from('settings').select('*').eq('id', 1).maybeSingle(),
+      sb.from('templates').select('*').order('created_at', { ascending: true })
     ]);
-    const bad = res.find(r => r.error);
+    const bad = res.slice(0, -1).find(r => r.error);
     if (bad) throw bad.error;
-    const [st, sub, ev, notes, set] = res.map(r => r.data);
+    const [st, sub, ev, notes, set, tpls] = res.map(r => r.data);
     this.settings = set || {};
+    this.templates = tpls || [];
     const m = new Map();
     for (const s of st) m.set(s.id, { ...s, field: s.field || '', topic: s.topic || '', email: s.email || '', sid: s.sid || '', cls: s.cls || '', memo: '', ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() });
     for (const n of notes) if (m.has(n.student_id)) m.get(n.student_id).memo = n.memo || '';
@@ -328,6 +341,7 @@ const Teacher = {
       </select>
       <span class="spacer"></span>
       <button class="btn" id="bReload">새로고침</button>
+      <button class="btn" id="bTpl">양식 관리</button>
       <button class="btn" id="bBulk">명단 붙여넣기</button>
       <button class="btn" id="bCsv">CSV 내보내기</button>
       <button class="btn primary" id="bAdd">학생 추가</button>
@@ -372,6 +386,27 @@ const Teacher = {
       <div class="mfoot"><button class="btn" data-close="mSet">취소</button><button class="btn primary" id="setGo">설정 저장</button></div>
     </div></div>
 
+    <div class="modal" id="mTpl" role="dialog" aria-modal="true" aria-labelledby="mTplT"><div class="mbox">
+      <h2 id="mTplT">양식 관리</h2>
+      <p>여기에 올린 양식은 학생 화면의 해당 칸에 ‘양식 내려받기’로 나타납니다. 같은 칸에 여러 개를 올릴 수 있어요.</p>
+      <div class="tpl-form">
+        <div class="row2 eq">
+          <div class="field"><label class="l" for="tStage">어느 칸에 보일까요</label>
+            <select class="in" id="tStage">${TPL_PLACES.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+          <div class="field"><label class="l" for="tTitle">양식 이름 (선택)</label><input class="in" id="tTitle" placeholder="비우면 파일 이름이 쓰입니다"></div>
+        </div>
+        <div class="tpl-pick">
+          <label class="btn" for="tFile">파일 고르기</label><input type="file" id="tFile" hidden>
+          <span class="hint" id="tPicked"></span>
+          <span class="spacer"></span>
+          <button class="btn primary" id="tGo">양식 올리기</button>
+        </div>
+      </div>
+      <h3 class="rv-h" style="margin-top:18px">올린 양식</h3>
+      <ul class="tpl-list" id="tList"></ul>
+      <div class="mfoot"><button class="btn" data-close="mTpl">닫기</button></div>
+    </div></div>
+
     <div class="review" id="review" role="dialog" aria-modal="true" aria-label="제출물 보면서 피드백 쓰기" aria-hidden="true">
       <div class="rv-head">
         <div class="rv-title"><b id="rvName"></b><span id="rvMeta"></span></div>
@@ -399,6 +434,9 @@ const Teacher = {
     ['q', 'fcls', 'fstatus', 'fsort'].forEach(id => $(id).addEventListener('input', () => this.renderRows()));
     $('bAdd').onclick = () => this.openDrawer(null);
     $('bBulk').onclick = () => this.openModal('mBulk');
+    $('bTpl').onclick = () => { this.renderTemplates(); this.openModal('mTpl'); };
+    $('tFile').onchange = () => { const f = $('tFile').files[0]; $('tPicked').textContent = f ? f.name : ''; };
+    $('tGo').onclick = () => this.uploadTemplate();
     $('bCsv').onclick = () => this.exportCsv();
     $('bReload').onclick = async () => { try { await this.load(); this.renderAll(); toast('새로 불러왔습니다.'); } catch (e) { toast(dbMsg(e)); } };
     $('dClose').onclick = () => this.closeDrawer();
@@ -962,6 +1000,57 @@ const Teacher = {
     }
   },
 
+  /* ----- 양식 관리 ----- */
+  templates: [],
+
+  renderTemplates() {
+    const list = $('tList');
+    if (!this.templates.length) { list.innerHTML = '<li class="hint">아직 올린 양식이 없습니다.</li>'; return; }
+    const order = Object.fromEntries(TPL_PLACES.map(([k], i) => [k, i]));
+    const items = [...this.templates].sort((a, b) => (order[a.stage] ?? 99) - (order[b.stage] ?? 99) || a.created_at.localeCompare(b.created_at));
+    list.innerHTML = items.map(t => `<li>
+      <span class="tpl-place">${esc(tplPlace(t.stage))}</span>
+      <span class="tpl-name">${esc(t.title || t.file_name)}${t.title && t.title !== t.file_name ? `<small>${esc(t.file_name)}</small>` : ''}</span>
+      <button class="btn sm" data-tdl="${esc(t.id)}">내려받기</button>
+      <button class="btn sm danger" data-tdel="${esc(t.id)}">삭제</button></li>`).join('');
+    list.querySelectorAll('[data-tdl]').forEach(b => b.onclick = () => downloadTemplate(this.templates.find(t => t.id === b.dataset.tdl)));
+    list.querySelectorAll('[data-tdel]').forEach(b => b.onclick = async () => {
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = '정말 삭제'; setTimeout(() => { if (b.isConnected) { b.classList.remove('armed'); b.textContent = '삭제'; } }, 3000); return; }
+      const t = this.templates.find(x => x.id === b.dataset.tdel);
+      const { error } = await sb.from('templates').delete().eq('id', t.id);
+      if (error) { toast(dbMsg(error)); return; }
+      await sb.storage.from(BUCKET).remove([t.file_path]);
+      this.templates = this.templates.filter(x => x.id !== t.id);
+      this.renderTemplates();
+      toast('양식을 삭제했습니다.');
+    });
+  },
+
+  async uploadTemplate() {
+    const file = $('tFile').files[0];
+    if (!file) { toast('먼저 파일을 고르세요.'); return; }
+    if (file.size > MAX_MB * 1024 * 1024) { toast(`파일이 ${MAX_MB}MB보다 큽니다.`); return; }
+    const ext = (file.name.includes('.') ? file.name.split('.').pop() : 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'bin';
+    const path = `templates/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const btn = $('tGo');
+    btn.disabled = true; btn.textContent = '올리는 중입니다';
+    try {
+      const { error: upErr } = await sb.storage.from(BUCKET).upload(path, file, { upsert: false, contentType: file.type || 'application/octet-stream' });
+      if (upErr) throw upErr;
+      const row = { stage: $('tStage').value, title: $('tTitle').value.trim() || file.name, file_path: path, file_name: file.name };
+      const { data, error } = await sb.from('templates').insert(row).select().single();
+      if (error) throw error;
+      this.templates.push(data);
+      $('tFile').value = ''; $('tTitle').value = ''; $('tPicked').textContent = '';
+      this.renderTemplates();
+      toast(`‘${tplPlace(row.stage)}’ 칸에 양식을 올렸습니다.`);
+    } catch (e) {
+      toast(e && e.message ? '양식을 올리지 못했습니다: ' + e.message : '양식을 올리지 못했습니다.');
+    } finally {
+      btn.disabled = false; btn.textContent = '양식 올리기';
+    }
+  },
+
   /* ----- 명단 붙여넣기 ----- */
   parseBulk(text) {
     const out = [];
@@ -1183,11 +1272,13 @@ const Student = {
       sb.from('students').select('*').eq('id', this.me.id).maybeSingle(),
       sb.from('submissions').select('*').eq('student_id', this.me.id),
       sb.from('events').select('*').eq('student_id', this.me.id).order('created_at', { ascending: false }),
-      sb.from('settings').select('*').eq('id', 1).maybeSingle()
+      sb.from('settings').select('*').eq('id', 1).maybeSingle(),
+      sb.from('templates').select('*').order('created_at', { ascending: true })
     ]);
-    const bad = res.find(r => r.error);
+    const bad = res.slice(0, -1).find(r => r.error);
     if (bad) throw bad.error;
-    const [me, subs, events, set] = res.map(r => r.data);
+    const [me, subs, events, set, tpls] = res.map(r => r.data);
+    this.templates = tpls || [];
     if (me) this.me = me;
     this.subs = {};
     for (const s of subs) this.subs[s.stage] = s;
@@ -1199,6 +1290,12 @@ const Student = {
   markSeen() {
     if (!this.unseen || !this.unseen.size) return;
     sb.rpc('mark_feedback_seen').then(({ error }) => { if (error) console.warn(error); });
+  },
+
+  tplLinks(stage, big) {
+    const ts = (this.templates || []).filter(t => t.stage === stage);
+    if (!ts.length) return '';
+    return `<div class="tpls${big ? ' big' : ''}"><span class="tpls-l">📎 양식 내려받기</span>${ts.map(t => `<button class="tpl" data-tpl="${esc(t.id)}">${esc(t.title || t.file_name)}</button>`).join('')}</div>`;
   },
 
   card(g) {
@@ -1223,6 +1320,7 @@ const Student = {
     return `<section class="card" data-stage="${g.key}">
       <div class="card-h"><h2>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.full}</h2>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
       <p class="due">${g.desc && (g.group === 'report' || g.group === 'output') ? `<b>${g.desc}</b><br>` : ''}${due ? `마감 ${fmtDate(due)}${ddayTag(due)}` : '마감일 미정'}</p>
+      ${this.tplLinks(g.key)}
       <div class="status-line"><span class="pill ${k}">${ST[k].label}</span>${sub.submitted_at ? `<span class="hint">${fmtDT(sub.submitted_at)} 제출</span>` : ''}</div>
       <p class="hint" style="margin-bottom:12px">${guide}</p>
       ${sub.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(sub.file_name || '제출 파일')}</span><button class="btn sm" data-open="${esc(sub.file_path)}">열기</button></div>` : ''}
@@ -1243,8 +1341,10 @@ const Student = {
         <p class="sub">${esc(me.sid || '')}${me.cls ? ` · ${esc(me.cls)}반` : ''} · ${esc(this.settings.program_name || '개인연구')}</p>
         <p class="me-topic">${me.topic ? '연구 주제: ' + esc(me.topic) : '연구 주제가 아직 등록되지 않았습니다.'}</p>
       </div></header>
+      ${this.tplLinks('all', true)}
       <div class="cards one">${this.card(STAGES[0])}</div>
       <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요${this.settings.report_due ? ` · 마감 ${fmtDate(this.settings.report_due)}` : ''}</span></h2>
+      ${this.tplLinks('report', true)}
       <div class="cards three">${PARTS.map(g => this.card(g)).join('')}</div>
       ${me.extra_required ? `<h2 class="group-title">개인연구보고서 <span>실험 대상 학생은 개인연구보고서도 한글 파일로 제출하세요</span></h2>
       <div class="cards one">${this.card(EXTRA)}</div>` : ''}
@@ -1252,6 +1352,7 @@ const Student = {
       <div class="cards one">${this.card(OUTPUT)}</div>`;
     bindLogout();
     app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
+    app.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => downloadTemplate(this.templates.find(t => t.id === b.dataset.tpl)));
     app.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => app.querySelector(`[data-file="${b.dataset.pick}"]`).click());
     app.querySelectorAll('[data-file]').forEach(inp => inp.onchange = () => { if (inp.files[0]) this.upload(inp.dataset.file, inp.files[0]); });
     app.querySelectorAll('[data-drop]').forEach(z => {
