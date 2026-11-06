@@ -132,6 +132,20 @@ function loadHwpLib() {
   }
   return hwpLibPromise;
 }
+let hwpxLibPromise = null;
+function loadHwpxLib() {
+  if (window.HWPXjs) return Promise.resolve(window.HWPXjs);
+  if (!hwpxLibPromise) {
+    hwpxLibPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'vendor/hwpx-viewer.min.js';
+      s.onload = () => window.HWPXjs ? resolve(window.HWPXjs) : reject(new Error('viewer'));
+      s.onerror = () => { hwpxLibPromise = null; reject(new Error('viewer')); };
+      document.head.appendChild(s);
+    });
+  }
+  return hwpxLibPromise;
+}
 async function downloadBlob(path) {
   const { data, error } = await sb.storage.from(BUCKET).download(path);
   if (error || !data) throw error || new Error('download');
@@ -172,6 +186,15 @@ async function renderDoc(el, path, name) {
       host.className = 'hwp-host';
       el.appendChild(host);
       new lib.Viewer(host, buf, { type: 'array' });
+    } else if (ext === 'hwpx') {
+      const lib = await loadHwpxLib();
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      const host = document.createElement('div');
+      host.className = 'hwp-host';
+      el.innerHTML = '';
+      el.appendChild(host);
+      const done = lib.render(host, buf);
+      return () => { done(); urls.forEach(u => URL.revokeObjectURL(u)); };
     } else if (ext === 'pdf') {
       const u = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
       urls.push(u);
@@ -189,11 +212,10 @@ async function renderDoc(el, path, name) {
       urls.push(u);
       el.innerHTML = `<div class="rv-img"><img src="${u}" alt="${esc(name)}"></div>`;
     } else {
-      const label = ext === 'hwpx' ? '한글 HWPX 파일은' : `.${esc(ext)} 파일은`;
-      fallback(`${label} 화면에서 바로 볼 수 없습니다. 내려받아 프로그램에서 열어 보세요. 학생에게 .hwp나 PDF로 내 달라고 하면 여기서 바로 볼 수 있습니다.`);
+      fallback(`.${esc(ext)} 파일은 화면에서 바로 볼 수 없습니다. 내려받아 프로그램에서 열어 보세요. 한글(.hwp, .hwpx), PDF, 사진은 여기서 바로 보입니다.`);
     }
   } catch (e) {
-    fallback('이 한글 파일은 화면에서 열지 못했습니다. 배포용 문서이거나 암호가 걸린 파일일 수 있습니다. 내려받아 한글에서 열어 보세요.');
+    fallback(ext === 'hwpx' ? '이 HWPX 파일은 화면에서 열지 못했습니다. 손상되었거나 암호가 걸린 파일일 수 있습니다. 내려받아 한글에서 열어 보세요.' : '이 한글 파일은 화면에서 열지 못했습니다. 배포용 문서이거나 암호가 걸린 파일일 수 있습니다. 내려받아 한글에서 열어 보세요.');
   }
   return () => urls.forEach(u => URL.revokeObjectURL(u));
 }
@@ -1652,7 +1674,7 @@ const Student = {
       ${canSubmit ? `<div class="upload" data-drop="${g.key}">
           <button class="btn primary" data-pick="${g.key}">${sub.file_path ? '수정본 제출하기' : '파일 선택해서 제출하기'}</button>
           <input type="file" accept="${acceptFor(g)}" data-file="${g.key}">
-          <p>${g.key === 'output' ? '사진, PDF, 한글, 발표자료(PPT), 영상(mp4) 모두 올릴 수 있어요. 여러 파일은 zip으로 묶어 주세요.' : '한글(.hwp) 또는 PDF로 내면 선생님이 화면에서 바로 읽고 피드백을 줄 수 있어요.'} 최대 ${MAX_MB}MB, 파일을 여기로 끌어다 놓아도 됩니다.</p>
+          <p>${g.key === 'output' ? '사진, PDF, 한글, 발표자료(PPT), 영상(mp4) 모두 올릴 수 있어요. 여러 파일은 zip으로 묶어 주세요.' : '한글(.hwp, .hwpx) 또는 PDF로 내면 선생님이 화면에서 바로 읽고 피드백을 줄 수 있어요.'} 최대 ${MAX_MB}MB, 파일을 여기로 끌어다 놓아도 됩니다.</p>
         </div>` : ''}
       ${timeline ? `<ul class="hist">${timeline}</ul>` : ''}
     </section>`;
@@ -1715,7 +1737,7 @@ const Student = {
       await this.load();
       this.render();
       this.markSeen();
- toast(stage === 'output' || ['hwp', 'pdf'].includes(ext) ? '제출했습니다. 선생님 피드백은 이 화면에 표시됩니다.' : '제출했습니다. 다만 이 형식은 선생님 화면에서 바로 열리지 않을 수 있어요. 가능하면 .hwp나 PDF로 다시 내 주세요.');
+ toast(stage === 'output' || ['hwp', 'hwpx', 'pdf'].includes(ext) ? '제출했습니다. 선생님 피드백은 이 화면에 표시됩니다.' : '제출했습니다. 다만 이 형식은 선생님 화면에서 바로 열리지 않을 수 있어요. 가능하면 한글이나 PDF로 다시 내 주세요.');
     } catch (e) {
       toast(e.message || '제출하지 못했습니다. 잠시 후 다시 시도하세요.');
       if (btn) { btn.disabled = false; btn.textContent = '파일 선택해서 제출하기'; }
