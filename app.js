@@ -276,6 +276,13 @@ const Teacher = {
 
   blank() { return { status: 'none', submitted_at: null, link: '', file_path: null, file_name: null }; },
 
+  teachers: [], isAdmin: false,
+  tName(email) {
+    if (!email) return '';
+    const t = this.teachers.find(x => x.email === email);
+    return (t && t.name) || email.split('@')[0];
+  },
+
   async start(email) {
     this.email = email;
     app.innerHTML = '<p class="loading">명단을 불러오는 중입니다.</p>';
@@ -286,6 +293,12 @@ const Teacher = {
   },
 
   async load() {
+    const tr = await sb.from('teachers').select('*').order('email');
+    if (tr.error) throw tr.error;
+    this.teachers = tr.data || [];
+    const meT = this.teachers.find(t => t.email === this.email);
+    /* is_admin 칸이 아직 없으면(업데이트 전) 모든 선생님을 관리자로 봅니다 */
+    this.isAdmin = !meT || meT.is_admin === undefined ? true : !!meT.is_admin;
     const res = await Promise.all([
       sb.from('students').select('*'),
       sb.from('submissions').select('*'),
@@ -316,13 +329,14 @@ const Teacher = {
   shell() {
     app.innerHTML = `${topBar(this.email)}
     <header class="top">
-      <div><h1 id="title"></h1><p class="sub">고등학교 1학년 개인연구 프로그램 · 교사용</p></div>
+      <div><h1 id="title"></h1><p class="sub" id="roleLine"></p></div>
       <div class="dues" id="dues"></div>
     </header>
     <section class="summary" id="summary" aria-label="제출 현황"></section>
     <div class="tools">
       <input class="search" id="q" type="search" placeholder="이름, 학번, 연구 주제로 찾기" aria-label="검색">
       <select class="f" id="fcls" aria-label="반"></select>
+      <select class="f" id="fteacher" aria-label="담당 교사" hidden></select>
       <select class="f" id="fstatus" aria-label="상태">
         <option value="">전체 상태</option>
         <option value="wait">피드백 대기</option>
@@ -340,8 +354,9 @@ const Teacher = {
       </select>
       <span class="spacer"></span>
       <button class="btn" id="bReload">새로고침</button>
-      <button class="btn" id="bTpl">양식 관리</button>
-      <button class="btn" id="bBulk">명단 붙여넣기</button>
+      <button class="btn admin-only" id="bAssign">담당 배정</button>
+      <button class="btn admin-only" id="bTpl">양식 관리</button>
+      <button class="btn admin-only" id="bBulk">명단 붙여넣기</button>
       <button class="btn" id="bCsv">CSV 내보내기</button>
       <button class="btn primary" id="bAdd">학생 추가</button>
     </div>
@@ -410,14 +425,23 @@ const Teacher = {
 
     <div class="modal" id="mTeach" role="dialog" aria-modal="true" aria-labelledby="mTeachT"><div class="mbox">
       <h2 id="mTeachT">선생님 계정</h2>
-      <p>여기에 있는 구글 계정은 관리 화면에 들어와 모든 학생의 제출물과 피드백을 보고 고칠 수 있습니다. 함께 지도하는 선생님의 학교 구글 이메일을 추가하세요.</p>
+      <p><b>관리자</b>는 모든 학생과 설정을 관리하고, <b>담당 교사</b>는 배정받은 학생만 보고 피드백할 수 있습니다. 추가한 뒤 ‘담당 배정’에서 학생을 나눠 주세요.</p>
       <div class="tpl-pick">
+        <input class="in" id="teachName" placeholder="이름 (예: 김민수)" autocomplete="off" style="flex:0 1 150px">
         <input class="in" id="teachEmail" type="email" placeholder="선생님 학교 구글 이메일" autocomplete="off" style="flex:1;min-width:200px">
         <button class="btn primary" id="teachAdd">추가</button>
       </div>
       <ul class="tpl-list" id="teachList"></ul>
-      <p class="hint">본인 계정은 여기서 지울 수 없습니다. 추가된 선생님은 사이트 주소로 접속해 구글 로그인만 하면 됩니다.</p>
+      <p class="hint">본인 계정은 여기서 지우거나 관리자 해제할 수 없습니다. 선생님을 지우면 그 선생님의 담당 학생은 ‘미배정’이 됩니다.</p>
       <div class="mfoot"><button class="btn" data-close="mTeach">닫기</button></div>
+    </div></div>
+
+    <div class="modal" id="mAssign" role="dialog" aria-modal="true" aria-labelledby="mAssignT"><div class="mbox">
+      <h2 id="mAssignT">담당 배정</h2>
+      <p>선생님을 고르고 담당할 학생을 체크한 뒤 저장하세요. 다른 선생님 담당인 학생을 체크하면 이 선생님으로 옮겨집니다.</p>
+      <div class="tpl-pick"><select class="in" id="asTeacher" style="flex:1"></select><button class="btn sm" id="asUn">미배정 학생만 체크</button></div>
+      <ul class="assign-list" id="asList"></ul>
+      <div class="mfoot"><span class="msg" id="asMsg"></span><button class="btn" data-close="mAssign">취소</button><button class="btn primary" id="asGo">저장</button></div>
     </div></div>
 
     <div class="review" id="review" role="dialog" aria-modal="true" aria-label="제출물 보면서 피드백 쓰기" aria-hidden="true">
@@ -451,6 +475,14 @@ const Teacher = {
     $('tFile').onchange = () => { const f = $('tFile').files[0]; $('tPicked').textContent = f ? f.name : ''; };
     $('tGo').onclick = () => this.uploadTemplate();
     $('teachAdd').onclick = () => this.addTeacher();
+    $('bAssign').onclick = () => this.openAssign();
+    $('asTeacher').onchange = () => this.renderAssign();
+    $('asUn').onclick = () => {
+      $('asList').querySelectorAll('input[data-st]').forEach(c => { if (!c.dataset.cur) c.checked = true; });
+      $('asMsg').textContent = `${$('asList').querySelectorAll('input:checked').length}명 선택`;
+    };
+    $('asGo').onclick = () => this.saveAssign();
+    $('fteacher').addEventListener('input', () => this.renderRows());
     $('teachEmail').onkeydown = e => { if (e.key === 'Enter') this.addTeacher(); };
     $('bCsv').onclick = () => this.exportCsv();
     $('bReload').onclick = async () => { try { await this.load(); this.renderAll(); toast('새로 불러왔습니다.'); } catch (e) { toast(dbMsg(e)); } };
@@ -495,11 +527,26 @@ const Teacher = {
     $('title').textContent = c.program_name || '개인연구 제출·피드백 관리';
     document.title = $('title').textContent;
     const anyExtra = [...this.students.values()].some(s => s.extra_required);
+    $('roleLine').innerHTML = this.isAdmin
+      ? `고등학교 1학년 개인연구 프로그램 · <b>관리자</b> (전체 학생 ${this.students.size}명)`
+      : `고등학교 1학년 개인연구 프로그램 · <b>${esc(this.tName(this.email))}</b> 선생님 담당 학생 ${this.students.size}명`;
     $('dues').innerHTML = DUES.filter(g => !g.extra || anyExtra).map(g => { const v = dueFrom(c, g.key); return v
       ? `<span>${g.label} <b>${fmtDate(v)}</b>${ddayTag(v)}</span>`
-      : `<span>${g.label} <b>미정</b></span>`; }).join('') + '<button class="linkbtn" id="bSet">마감일 설정</button><button class="linkbtn" id="bTeachers">선생님 계정</button>';
-    $('bSet').onclick = () => this.openSettings();
-    $('bTeachers').onclick = () => this.openTeachers();
+      : `<span>${g.label} <b>미정</b></span>`; }).join('') + (this.isAdmin ? '<button class="linkbtn" id="bSet">마감일 설정</button><button class="linkbtn" id="bTeachers">선생님 계정</button>' : '');
+    if (this.isAdmin) {
+      $('bSet').onclick = () => this.openSettings();
+      $('bTeachers').onclick = () => this.openTeachers();
+    }
+    app.querySelectorAll('.admin-only').forEach(b => b.hidden = !this.isAdmin);
+    $('bAdd').hidden = !this.isAdmin;
+    const ft = $('fteacher');
+    ft.hidden = !this.isAdmin;
+    if (this.isAdmin) {
+      const cur = ft.value;
+      ft.innerHTML = '<option value="">전체 담당 교사</option><option value="__none">미배정</option>' +
+        this.teachers.map(t => `<option value="${esc(t.email)}">${esc(this.tName(t.email))} 선생님</option>`).join('');
+      ft.value = [...ft.options].some(o => o.value === cur) ? cur : '';
+    }
   },
 
   renderSummary() {
@@ -526,11 +573,16 @@ const Teacher = {
       <button class="todo rev" data-f="revise"><span>보완 요청 후 재제출 대기</span><span class="n">${rev}</span></button>
       <button class="todo late" data-f="late"><span>마감 지나고 미제출한 학생</span><span class="n">${late}</span></button>
       ${nomail ? `<button class="todo mail" data-f="nomail"><span>이메일 미등록 (로그인 불가)</span><span class="n">${nomail}</span></button>` : ''}
+      ${this.isAdmin && list.some(s => !s.teacher_email) ? `<button class="todo mail" data-tf="__none"><span>담당 교사 미배정</span><span class="n">${list.filter(s => !s.teacher_email).length}</span></button>` : ''}
       ${noconsent ? `<button class="todo mail" data-f="noconsent"><span>개인정보 동의 전</span><span class="n">${noconsent}</span></button>` : ''}
       ${wait ? `<button class="btn primary" id="rvStart">대기 중인 제출물 차례로 검토하기</button>` : ''}
     </div></div>`;
     $('summary').innerHTML = html;
-    $('summary').querySelectorAll('.todo').forEach(b => b.onclick = () => { $('fstatus').value = b.dataset.f; this.renderRows(); });
+    $('summary').querySelectorAll('.todo').forEach(b => b.onclick = () => {
+      if (b.dataset.tf) { $('fteacher').value = b.dataset.tf; $('fstatus').value = ''; }
+      else $('fstatus').value = b.dataset.f;
+      this.renderRows();
+    });
     const rs = $('rvStart');
     if (rs) rs.onclick = () => this.openReview(this.waitingQueue(), 0);
   },
@@ -549,6 +601,9 @@ const Teacher = {
     if (q && !(s.name + ' ' + s.sid + ' ' + s.topic + ' ' + s.field + ' ' + s.email).toLowerCase().includes(q)) return false;
     const c = $('fcls').value;
     if (c && String(s.cls) !== c) return false;
+    const ft = this.isAdmin ? $('fteacher').value : '';
+    if (ft === '__none' && s.teacher_email) return false;
+    if (ft && ft !== '__none' && s.teacher_email !== ft) return false;
     const f = $('fstatus').value;
     if (f === 'wait') return stagesFor(s).some(g => s[g.key].status === 'waiting');
     if (f === 'revise') return stagesFor(s).some(g => s[g.key].status === 'revise');
@@ -601,7 +656,7 @@ const Teacher = {
       return (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }) || a.name.localeCompare(b.name, 'ko');
     });
     $('rows').innerHTML = list.map(s => `<tr data-id="${esc(s.id)}" tabindex="0">
-      <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${!s.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(s) ? '' : '<span class="nomail">동의 전</span>'}</td>
+      <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${this.isAdmin ? (s.teacher_email ? `<span class="tch">${esc(this.tName(s.teacher_email))}</span>` : '<span class="tch none">미배정</span>') : ''}${!s.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(s) ? '' : '<span class="nomail">동의 전</span>'}</td>
       <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${s.topic_updated_at && (Date.now() - new Date(s.topic_updated_at)) < 7 * 86400000 ? '<span class="tnew">학생 수정</span>' : ''}${esc(s.topic) || '주제 미정'}</div></td>
       <td class="c-report">${this.partsCell(s)}</td>
       <td class="c-recent"><span class="recent">${rel(this.lastActivity(s))}</span></td></tr>`).join('');
@@ -613,7 +668,9 @@ const Teacher = {
     const total = this.students.size;
     $('count').textContent = total ? (list.length === total ? `학생 ${total}명` : `학생 ${total}명 중 ${list.length}명 표시`) : '';
     let empty = '';
-    if (!total) empty = '<div class="empty-state"><p>아직 등록된 학생이 없습니다. 반 명단을 붙여넣으면 한 번에 등록됩니다.</p><button class="btn primary" id="emptyBulk">명단 붙여넣기</button></div>';
+    if (!total) empty = this.isAdmin
+      ? '<div class="empty-state"><p>아직 등록된 학생이 없습니다. 반 명단을 붙여넣으면 한 번에 등록됩니다.</p><button class="btn primary" id="emptyBulk">명단 붙여넣기</button></div>'
+      : '<div class="empty-state"><p>아직 배정된 담당 학생이 없습니다. 관리자 선생님께 담당 배정을 요청하세요.</p></div>';
     else if (!list.length) empty = '<div class="empty-state"><p>조건에 맞는 학생이 없습니다. 검색어나 필터를 바꿔 보세요.</p></div>';
     $('empty').innerHTML = empty;
     const eb = $('emptyBulk');
@@ -658,7 +715,7 @@ const Teacher = {
     if (this.dirty) { m.textContent = '저장하지 않은 변경 있음'; m.className = 'msg dirty'; }
     else { m.textContent = this.draft?.updated_at ? '마지막 저장 ' + fmtDT(this.draft.updated_at) : ''; m.className = 'msg'; }
     $('dSave').disabled = !this.dirty;
-    $('dDel').hidden = this.isNew;
+    $('dDel').hidden = this.isNew || !this.isAdmin;
     $('dDel').classList.remove('armed');
     $('dDel').textContent = '학생 삭제';
   },
@@ -705,6 +762,9 @@ const Teacher = {
         <div class="field"><label class="l" for="f-cls">반</label><input class="in" id="f-cls" data-k="cls" placeholder="학번에서 자동" value="${esc(d.cls)}"></div>
         <div class="field"><label class="l" for="f-field">연구 분야</label><input class="in" id="f-field" data-k="field" placeholder="예: 건축, 수학" value="${esc(d.field)}"></div>
       </div>
+      ${this.isAdmin
+        ? `<div class="field"><label class="l" for="f-teacher">담당 교사</label><select class="in" id="f-teacher" data-k="teacher_email"><option value="">미배정</option>${this.teachers.map(t => `<option value="${esc(t.email)}" ${d.teacher_email === t.email ? 'selected' : ''}>${esc(this.tName(t.email))} (${esc(t.email)})</option>`).join('')}</select></div>`
+        : ''}
       <div class="field"><label class="l" for="f-email">학교 구글 이메일 (학생 로그인용)</label><input class="in" id="f-email" data-k="email" type="email" autocomplete="off" value="${esc(d.email)}"></div>
       <div class="field"><label class="l" for="f-topic">연구 주제</label><input class="in" id="f-topic" data-k="topic" value="${esc(d.topic)}">
         ${d.topic_updated_at ? `<p class="hint">학생이 ${fmtDT(d.topic_updated_at)}에 수정함${d.topic_prev ? ` · 이전 주제: ${esc(d.topic_prev)}` : ''}</p>` : ''}</div>
@@ -768,6 +828,7 @@ const Teacher = {
       topic: d.topic.trim(),
       extra_required: !!d.extra_required
     };
+    if (this.isAdmin) row.teacher_email = d.teacher_email || null;
     if (!row.name) { toast('이름을 입력하세요.'); $('f-name').focus(); return; }
     if (row.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) { toast('이메일 형식을 확인하세요.'); $('f-email').focus(); return; }
 
@@ -782,7 +843,7 @@ const Teacher = {
         if (error) throw error;
         id = data.id;
       } else {
-        const changed = ['sid', 'name', 'cls', 'email', 'field', 'topic'].some(k => (row[k] || '') !== (o[k] || '')) || row.extra_required !== !!o.extra_required;
+        const changed = ['sid', 'name', 'cls', 'email', 'field', 'topic'].some(k => (row[k] || '') !== (o[k] || '')) || row.extra_required !== !!o.extra_required || (this.isAdmin && (row.teacher_email || '') !== (o.teacher_email || ''));
         if (changed) {
           const { error } = await sb.from('students').update({ ...row, updated_at: now }).eq('id', id);
           if (error) throw error;
@@ -1022,31 +1083,81 @@ const Teacher = {
 
   async loadTeachers() {
     const list = $('teachList');
-    list.innerHTML = '<li class="hint">불러오는 중입니다.</li>';
-    const { data, error } = await sb.from('teachers').select('*').order('email');
-    if (error) { list.innerHTML = `<li class="hint">목록을 불러오지 못했습니다. ${esc(dbMsg(error))}</li>`; return; }
-    list.innerHTML = data.map(t => `<li>
-      <span class="tpl-name">${esc(t.email)}</span>
-      ${t.email === this.email ? '<span class="tpl-place">나</span>' : `<button class="btn sm danger" data-tchdel="${esc(t.email)}">삭제</button>`}
+    try { await this.load(); this.renderAll(); } catch (e) { list.innerHTML = `<li class="hint">목록을 불러오지 못했습니다. ${esc(dbMsg(e))}</li>`; return; }
+    const cnt = e => [...this.students.values()].filter(s => s.teacher_email === e).length;
+    list.innerHTML = this.teachers.map(t => `<li>
+      <span class="tpl-name">${esc(this.tName(t.email))}${t.is_admin ? ' <span class="tpl-place">관리자</span>' : ''}${t.email === this.email ? ' <span class="tpl-place me">나</span>' : ''}<small>${esc(t.email)} · 담당 ${cnt(t.email)}명</small></span>
+      ${t.email === this.email ? '' : `<button class="btn sm" data-tchadm="${esc(t.email)}">${t.is_admin ? '관리자 해제' : '관리자로 지정'}</button><button class="btn sm danger" data-tchdel="${esc(t.email)}">삭제</button>`}
     </li>`).join('');
+    list.querySelectorAll('[data-tchadm]').forEach(b => b.onclick = async () => {
+      const t = this.teachers.find(x => x.email === b.dataset.tchadm);
+      const { error } = await sb.from('teachers').update({ is_admin: !t.is_admin }).eq('email', t.email);
+      if (error) { toast(dbMsg(error)); return; }
+      toast(t.is_admin ? '관리자에서 해제했습니다.' : '관리자로 지정했습니다.');
+      this.loadTeachers();
+    });
     list.querySelectorAll('[data-tchdel]').forEach(b => b.onclick = async () => {
       if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = '정말 삭제'; setTimeout(() => { if (b.isConnected) { b.classList.remove('armed'); b.textContent = '삭제'; } }, 3000); return; }
       const { error: e2 } = await sb.from('teachers').delete().eq('email', b.dataset.tchdel);
       if (e2) { toast(dbMsg(e2)); return; }
-      toast('선생님 계정을 삭제했습니다.');
+      toast('선생님 계정을 삭제했습니다. 담당 학생은 미배정이 됐습니다.');
       this.loadTeachers();
     });
   },
 
   async addTeacher() {
     const email = $('teachEmail').value.trim().toLowerCase();
+    const name = $('teachName').value.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('이메일 형식을 확인하세요.'); $('teachEmail').focus(); return; }
     if ([...this.students.values()].some(s => s.email === email)) { toast('학생으로 등록된 이메일입니다. 학생 명단에서 먼저 빼 주세요.'); return; }
-    const { error } = await sb.from('teachers').insert({ email });
+    const { error } = await sb.from('teachers').insert({ email, name: name || null });
     if (error) { toast(error.code === '23505' ? '이미 추가된 선생님입니다.' : dbMsg(error)); return; }
-    $('teachEmail').value = '';
-    toast(`${email} 계정을 선생님으로 추가했습니다.`);
+    $('teachEmail').value = ''; $('teachName').value = '';
+    toast(`${name || email} 선생님을 추가했습니다. ‘담당 배정’에서 학생을 나눠 주세요.`);
     this.loadTeachers();
+  },
+
+  /* ----- 담당 배정 ----- */
+  openAssign() {
+    const sel = $('asTeacher');
+    sel.innerHTML = this.teachers.map(t => `<option value="${esc(t.email)}">${esc(this.tName(t.email))} 선생님 (${esc(t.email)})</option>`).join('');
+    const ft = $('fteacher').value;
+    if (ft && ft !== '__none') sel.value = ft;
+    $('asMsg').textContent = '';
+    this.renderAssign();
+    this.openModal('mAssign');
+  },
+
+  renderAssign() {
+    const te = $('asTeacher').value;
+    const list = [...this.students.values()].sort((a, b) => (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }));
+    $('asList').innerHTML = list.map(s => `<li><label>
+      <input type="checkbox" data-st="${esc(s.id)}" ${s.teacher_email ? `data-cur="${esc(s.teacher_email)}"` : ''} ${s.teacher_email === te ? 'checked' : ''}>
+      <span class="sid">${esc(s.sid || '')}</span> <span class="nm">${esc(s.name)}</span>
+      <span class="tch${s.teacher_email ? '' : ' none'}">${s.teacher_email ? (s.teacher_email === te ? '이 선생님' : esc(this.tName(s.teacher_email))) : '미배정'}</span>
+    </label></li>`).join('');
+    const upd = () => { $('asMsg').textContent = `${$('asList').querySelectorAll('input:checked').length}명 선택`; };
+    $('asList').querySelectorAll('input').forEach(c => c.onchange = upd);
+    upd();
+  },
+
+  async saveAssign() {
+    const te = $('asTeacher').value;
+    if (!te) return;
+    const boxes = [...$('asList').querySelectorAll('input[data-st]')];
+    const add = boxes.filter(c => c.checked && c.dataset.cur !== te).map(c => c.dataset.st);
+    const remove = boxes.filter(c => !c.checked && c.dataset.cur === te).map(c => c.dataset.st);
+    if (!add.length && !remove.length) { this.closeModal('mAssign'); return; }
+    $('asGo').disabled = true;
+    try {
+      if (add.length) { const { error } = await sb.from('students').update({ teacher_email: te }).in('id', add); if (error) throw error; }
+      if (remove.length) { const { error } = await sb.from('students').update({ teacher_email: null }).in('id', remove); if (error) throw error; }
+      await this.load();
+      this.renderAll();
+      this.closeModal('mAssign');
+      toast(`${this.tName(te)} 선생님 담당: ${add.length}명 추가${remove.length ? `, ${remove.length}명 해제` : ''}`);
+    } catch (e) { toast(dbMsg(e)); }
+    finally { $('asGo').disabled = false; }
   },
 
   /* ----- 양식 관리 ----- */
@@ -1190,10 +1301,10 @@ const Teacher = {
   exportCsv() {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const lastNote = arr => (arr.find(e => e.kind === 'feedback' && e.note) || {}).note || '';
-    const head = ['학번', '이름', '반', '이메일', '연구 분야', '연구 주제', ...STAGES.flatMap(g => [g.full + ' 상태', g.full + ' 제출일', g.full + ' 최근 피드백']), '개인정보 동의일', '지도 메모'];
+    const head = ['학번', '이름', '반', '담당 교사', '이메일', '연구 분야', '연구 주제', ...STAGES.flatMap(g => [g.full + ' 상태', g.full + ' 제출일', g.full + ' 최근 피드백']), '개인정보 동의일', '지도 메모'];
     const list = [...this.students.values()].sort((a, b) => (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }));
     const lines = [head.map(q).join(',')].concat(list.map(s => [
-      s.sid, s.name, s.cls, s.email, s.field, s.topic,
+      s.sid, s.name, s.cls, this.tName(s.teacher_email), s.email, s.field, s.topic,
       ...STAGES.flatMap(g => applies(s, g) ? [ST[s[g.key].status].label, dateOf(s[g.key].submitted_at), lastNote(s.ev[g.key])] : ['해당 없음', '', '']), hasConsent(s) ? dateOf(s.consent_at) : '', s.memo
     ].map(q).join(',')));
     const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -1329,6 +1440,8 @@ const Student = {
     if (bad) throw bad.error;
     const [me, subs, events, set, tpls] = res.map(r => r.data);
     this.templates = tpls || [];
+    const tn = await sb.rpc('my_teacher_name');
+    this.teacherName = tn.error ? '' : (tn.data || '');
     if (me) this.me = me;
     this.subs = {};
     for (const s of subs) this.subs[s.stage] = s;
@@ -1468,7 +1581,7 @@ const Student = {
     app.innerHTML = `${topBar(this.email)}
       <header class="top"><div>
         <h1>${esc(me.name)}</h1>
-        <p class="sub">${esc(me.sid || '')}${me.cls ? ` · ${esc(me.cls)}반` : ''} · ${esc(this.settings.program_name || '개인연구')}</p>
+        <p class="sub">${esc(me.sid || '')}${me.cls ? ` · ${esc(me.cls)}반` : ''} · ${esc(this.settings.program_name || '개인연구')}${this.teacherName ? ` · 담당 <b>${esc(this.teacherName)}</b> 선생님` : ''}</p>
         <div class="me-topic" id="topicBox">${this.topicView()}</div>
       </div></header>
       ${this.progressHTML()}
