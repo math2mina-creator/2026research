@@ -15,6 +15,7 @@ const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg
 const ACCEPT_OUTPUT = ACCEPT + ',.gif,.webp,.mp4,.mov,.m4a,.mp3,.txt,.csv';
 const acceptFor = g => g.key === 'output' ? ACCEPT_OUTPUT : ACCEPT;
 const STAGES = [
+  { key: 'plan', label: '계획서', full: '연구계획서', due: 'plan_due', group: 'plan' },
   { key: 'intro', label: '서론', full: '최종보고서 1. 서론', desc: '연구 주제 선정 이유, 연구 주제와 관련된 연구 동향 분석', due: 'intro_due', group: 'report' },
   { key: 'body', label: '본론', full: '최종보고서 2. 본론', desc: '연구 내용 설명', due: 'body_due', group: 'report' },
   { key: 'conclusion', label: '결론', full: '최종보고서 3. 결론', desc: '보고서 결론', due: 'conclusion_due', group: 'report' },
@@ -22,12 +23,13 @@ const STAGES = [
   { key: 'output', label: '산출물', full: '산출물', desc: '연구 과정에서 만든 결과물 (사진, 발표자료, 모형·작품 사진, 영상 등)', due: 'output_due', group: 'output' }
 ];
 const OUTPUT = STAGES.find(g => g.key === 'output');
+const PLAN = STAGES.find(g => g.key === 'plan');
 /* 양식을 보여 줄 위치 */
 const TPL_PLACES = [
-  ['all', '모든 학생 공통 (학생 화면 맨 위)'], ['report', '최종보고서'],
+  ['all', '모든 학생 공통 (학생 화면 맨 위)'], ['plan', '연구계획서'], ['report', '최종보고서'],
   ['extra', '개인연구보고서 (대상 학생만)'], ['output', '산출물']
 ];
-const tplPlace = k => (TPL_PLACES.find(x => x[0] === k) || [k, ({ plan: '연구계획서', intro: '서론', body: '본론', conclusion: '결론' })[k] + ' (이전 위치, 학생에게 안 보임)'])[1];
+const tplPlace = k => (TPL_PLACES.find(x => x[0] === k) || [k, ({ intro: '서론', body: '본론', conclusion: '결론' })[k] + ' (이전 위치, 학생에게 안 보임)'])[1];
 async function downloadTemplate(t) {
   try { saveBlob(await downloadBlob(t.file_path), t.file_name); }
   catch (e) { toast(e && e.demo ? e.message : '양식을 내려받지 못했습니다.'); }
@@ -39,7 +41,7 @@ const EXTRA = STAGES.find(g => g.key === 'extra');
 const PARTS = STAGES.filter(g => g.group === 'report');
 const stageMap = () => Object.fromEntries(STAGES.map(g => [g.key, '']));
 const evMap = () => Object.fromEntries(STAGES.map(g => [g.key, []]));
-const DUES = [{ key: 'intro_due', label: '서론' }, { key: 'body_due', label: '본론' }, { key: 'conclusion_due', label: '결론' }, { key: 'extra_due', label: '개인연구보고서', extra: true }, { key: 'output_due', label: '산출물' }];
+const DUES = [{ key: 'plan_due', label: '계획서' }, { key: 'intro_due', label: '서론' }, { key: 'body_due', label: '본론' }, { key: 'conclusion_due', label: '결론' }, { key: 'extra_due', label: '개인연구보고서', extra: true }, { key: 'output_due', label: '산출물' }];
 /* 마감일: 부분별 마감일이 없으면 예전 '최종보고서 마감일'을 씁니다. */
 const dueFrom = (settings, key) => (settings && (settings[key] || (['intro_due', 'body_due', 'conclusion_due'].includes(key) ? settings.report_due : null))) || null;
 const ST = {
@@ -348,6 +350,7 @@ const Teacher = {
         <option value="">전체 상태</option>
         <option value="wait">피드백 대기</option>
         <option value="revise">보완 요청 중</option>
+        <option value="plan-none">계획서 미제출</option>
         <option value="report-none">보고서 미제출 부분 있음</option>
         <option value="output-none">산출물 미제출</option>
         <option value="late">마감 지남 미제출</option>
@@ -369,7 +372,7 @@ const Teacher = {
     </div>
     <p class="count" id="count"></p>
     <div class="tablebox">
-      <table><thead><tr><th>학번·이름</th><th>연구 주제</th><th>최종보고서·산출물</th><th>최근 활동</th></tr></thead><tbody id="rows"></tbody></table>
+      <table><thead><tr><th>학번·이름</th><th>연구 주제</th><th>제출 현황</th><th>최근 활동</th></tr></thead><tbody id="rows"></tbody></table>
       <div id="empty"></div>
     </div>
 
@@ -397,6 +400,9 @@ const Teacher = {
     <div class="modal" id="mSet" role="dialog" aria-modal="true" aria-labelledby="mSetT"><div class="mbox">
       <h2 id="mSetT">프로그램 설정</h2>
       <div class="field"><label class="l" for="sName">프로그램 이름</label><input class="in" id="sName"></div>
+      <div class="row2 eq">
+        <div class="field"><label class="l" for="sPlan">연구계획서 마감일</label><input class="in" id="sPlan" type="date"></div>
+      </div>
       <p class="hint" style="margin:4px 0 10px">최종보고서</p>
       <div class="row3">
         <div class="field"><label class="l" for="sIntro">1. 서론 마감일</label><input class="in" id="sIntro" type="date"></div>
@@ -569,8 +575,9 @@ const Teacher = {
     const legend = cnt => `<div class="legend">${ORDER.map(k => `<span><i style="background:${ST[k].color}"></i>${ST[k].label} ${cnt[k]}</span>`).join('')}</div>`;
     let html = '';
     const allIn = list.filter(s => PARTS.every(g => s[g.key].status !== 'none')).length;
-    html += `<div class="sum"><h2>최종보고서</h2><div class="big">${allIn}<small>/ ${n}명 세 부분 모두 제출</small></div>
-      <div class="parts">${PARTS.map(g => { const c = count(g.key); return `<div class="part-row"><span class="pl">${g.label}</span>${bar(c, true)}<span class="pn">${n - c.none}/${n}</span></div>`; }).join('')}</div>
+    const pc = count('plan');
+    html += `<div class="sum"><h2>제출 현황</h2><div class="big">${allIn}<small>/ ${n}명 최종보고서 세 부분 모두 제출</small></div>
+      <div class="parts"><div class="part-row plan-row"><span class="pl">계획서</span>${bar(pc, true)}<span class="pn">${n - pc.none}/${n}</span></div>${PARTS.map(g => { const c = count(g.key); return `<div class="part-row"><span class="pl">${g.label}</span>${bar(c, true)}<span class="pn">${n - c.none}/${n}</span></div>`; }).join('')}</div>
       ${(() => { const ex = list.filter(s => s.extra_required); if (!ex.length) return ''; const c = { none: 0, waiting: 0, revise: 0, done: 0 }; ex.forEach(s => c[s.extra.status || 'none']++); const m = ex.length;
         return `<div class="part-row extra-row"><span class="pl">개인연구보고서</span><div class="bar thin">${ORDER.filter(k => k !== 'none').map(k => c[k] ? `<span style="width:${c[k] / m * 100}%;background:${ST[k].color}"></span>` : '').join('')}</div><span class="pn">${m - c.none}/${m}</span></div>`; })()}
       ${(() => { const c = count('output'); return `<div class="part-row extra-row"><span class="pl">산출물</span>${bar(c, true)}<span class="pn">${n - c.none}/${n}</span></div>`; })()}
@@ -623,6 +630,7 @@ const Teacher = {
     if (f === 'revise') return stagesFor(s).some(g => s[g.key].status === 'revise');
     if (f === 'extra') return !!s.extra_required;
     if (f === 'output-none') return s.output.status === 'none';
+    if (f === 'plan-none') return s.plan.status === 'none';
     if (f === 'report-none') return PARTS.some(g => s[g.key].status === 'none');
     if (f === 'late') return stagesFor(s).some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)));
     if (f === 'alldone') return stagesFor(s).every(g => s[g.key].status === 'done');
@@ -632,6 +640,8 @@ const Teacher = {
   },
 
   partsCell(s) {
+    const pk = s.plan.status || 'none';
+    const planChip = `<span class="chip ${pk} plan${this.justStamped === s.id + 'plan' ? ' pressed' : ''}" title="연구계획서: ${ST[pk].label}">${pk === 'done' ? '✓ ' : ''}계획서</span>`;
     const chips = PARTS.map(g => {
       const k = s[g.key].status || 'none';
       return `<span class="chip ${k}${this.justStamped === s.id + g.key ? ' pressed' : ''}" title="${g.full}: ${ST[k].label}">${k === 'done' ? '✓ ' : ''}${g.label}</span>`;
@@ -639,12 +649,12 @@ const Teacher = {
     const ek = s.extra_required ? (s.extra.status || 'none') : null;
     const extraChip = ek ? `<span class="chip ${ek} extra${this.justStamped === s.id + 'extra' ? ' pressed' : ''}" title="개인연구보고서: ${ST[ek].label}">${ek === 'done' ? '✓ ' : ''}개인연구</span>` : '';
     const missing = PARTS.filter(g => s[g.key].status === 'none').length;
-    const overdue = [...PARTS, ...(s.extra_required ? [EXTRA] : []), OUTPUT].some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)));
+    const overdue = [PLAN, ...PARTS, ...(s.extra_required ? [EXTRA] : []), OUTPUT].some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)));
     const meta = overdue ? '<div class="meta warn">마감 지난 미제출 있음</div>'
-      : [...PARTS, ...(s.extra_required ? [EXTRA] : []), OUTPUT].some(g => s[g.key].status === 'waiting') ? '<div class="meta">피드백 대기 있음</div>' : '';
+      : [PLAN, ...PARTS, ...(s.extra_required ? [EXTRA] : []), OUTPUT].some(g => s[g.key].status === 'waiting') ? '<div class="meta">피드백 대기 있음</div>' : '';
     const ok = s.output.status || 'none';
     const outChip = `<span class="chip ${ok} out${this.justStamped === s.id + 'output' ? ' pressed' : ''}" title="산출물: ${ST[ok].label}">${ok === 'done' ? '✓ ' : ''}산출물</span>`;
-    return `<div class="chips">${chips}${extraChip}${outChip}</div>${meta}`;
+    return `<div class="chips">${planChip}${chips}${extraChip}${outChip}</div>${meta}`;
   },
 
   stageCell(s, g) {
@@ -749,8 +759,8 @@ const Teacher = {
         ${e.kind !== 'submit' ? `<button class="del" data-del="${esc(e.id)}" aria-label="이 기록 삭제">삭제</button>` : ''}</div>${body}</li>`;
     }).join('');
     return `<section class="stage" data-stage="${g.key}">
-      ${g.key === PARTS[0].key ? '<h3 class="group-h">최종보고서</h3>' : ''}${g.key === 'extra' ? '<h3 class="group-h">개인연구보고서</h3>' : ''}${g.key === 'output' ? '<h3 class="group-h">산출물</h3>' : ''}
-      <div class="stage-h"><h3>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.group === 'extra' || g.group === 'output' ? '제출물' : g.label}${g.desc ? `<small class="desc">${g.desc}</small>` : ''}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
+      ${g.key === 'plan' ? '<h3 class="group-h">연구계획서</h3>' : ''}${g.key === PARTS[0].key ? '<h3 class="group-h">최종보고서</h3>' : ''}${g.key === 'extra' ? '<h3 class="group-h">개인연구보고서</h3>' : ''}${g.key === 'output' ? '<h3 class="group-h">산출물</h3>' : ''}
+      <div class="stage-h"><h3>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.group === 'extra' || g.group === 'output' || g.group === 'plan' ? '제출물' : g.label}${g.desc ? `<small class="desc">${g.desc}</small>` : ''}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
       ${st.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(st.file_name || '제출 파일')}</span><button class="btn sm primary" data-review="${g.key}">보면서 피드백 쓰기</button></div>` : ''}
       <div class="seg" role="radiogroup" aria-label="${g.label} 상태">
         ${['none', 'waiting', 'revise', 'done'].map(s => `<label class="${k === s ? 'sel-' + s : ''}"><input type="radio" name="st-${g.key}" value="${s}" ${k === s ? 'checked' : ''}><span>${ST[s].label}</span></label>`).join('')}
@@ -1317,6 +1327,7 @@ const Teacher = {
   closeModal(id) { $(id).classList.remove('on'); },
   openSettings() {
     $('sName').value = this.settings.program_name || '';
+ $('sPlan').value = this.settings.plan_due || '';
     $('sIntro').value = dueFrom(this.settings, 'intro_due') || '';
     $('sBody').value = dueFrom(this.settings, 'body_due') || '';
     $('sConclusion').value = dueFrom(this.settings, 'conclusion_due') || '';
@@ -1325,7 +1336,7 @@ const Teacher = {
     this.openModal('mSet');
   },
   async saveSettings() {
-    const c = { program_name: $('sName').value.trim() || null, intro_due: $('sIntro').value || null, body_due: $('sBody').value || null, conclusion_due: $('sConclusion').value || null, report_due: null, extra_due: $('sExtra').value || null, output_due: $('sOutput').value || null };
+    const c = { program_name: $('sName').value.trim() || null, plan_due: $('sPlan').value || null, intro_due: $('sIntro').value || null, body_due: $('sBody').value || null, conclusion_due: $('sConclusion').value || null, report_due: null, extra_due: $('sExtra').value || null, output_due: $('sOutput').value || null };
     const { error } = await sb.from('settings').update(c).eq('id', 1);
     if (error) { toast(dbMsg(error)); return; }
     this.settings = { ...this.settings, ...c };
@@ -1657,6 +1668,8 @@ const Student = {
       </div></header>
       ${this.progressHTML()}
       ${this.tplLinks('all', true)}
+      <h2 class="group-title">연구계획서 <span>연구 주제, 연구 목적, 연구 방법과 일정을 담은 계획서를 한글 파일로 올리세요.</span></h2>
+      <div class="cards one">${this.card(PLAN)}</div>
       <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요. 부분마다 마감일이 다를 수 있어요.</span></h2>
       ${this.tplLinks('report', true)}
       <div class="cards three">${PARTS.map(g => this.card(g)).join('')}</div>

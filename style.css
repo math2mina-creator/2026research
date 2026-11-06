@@ -375,3 +375,5 @@ img.sig{display:block;margin-top:6px;max-width:240px;width:100%;background:#fff;
 .pick-item:hover{border-color:var(--ink-3)}
 .pick-item.on{border-color:var(--blue);background:var(--blue-bg);color:var(--blue)}
 .pick-item input{width:18px;height:18px;flex:none}
+.part-row.plan-row{grid-template-columns:34px 1fr 44px;padding-bottom:6px;margin-bottom:2px;border-bottom:1px dashed var(--line)}
+.chip.plan{margin-right:6px}
