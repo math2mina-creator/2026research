@@ -221,7 +221,7 @@ async function route(session) {
 
   const { data: isTeacher, error } = await sb.rpc('is_teacher');
   if (error) { renderMessage(email, '서버에 연결하지 못했습니다.', '잠시 후 새로고침해 주세요. 계속 안 되면 Supabase 프로젝트가 일시 정지되지 않았는지 확인하세요.'); return; }
-  if (isTeacher) { await Teacher.start(email); return; }
+  if (isTeacher) { await Teacher.start(email, session); return; }
 
   const { data: me } = await sb.from('students').select('*').maybeSingle();
   if (me) { await Student.start(email, me); return; }
@@ -283,11 +283,18 @@ const Teacher = {
     return (t && t.name) || email.split('@')[0];
   },
 
-  async start(email) {
+  async start(email, session) {
     this.email = email;
     app.innerHTML = '<p class="loading">명단을 불러오는 중입니다.</p>';
     try { await this.load(); }
     catch (e) { renderMessage(email, '명단을 불러오지 못했습니다.', esc(dbMsg(e))); return; }
+    /* 이름이 비어 있으면 구글 계정의 이름으로 채웁니다 (선생님 계정에서 언제든 고칠 수 있음) */
+    const meT = this.teachers.find(t => t.email === email);
+    const gName = session && session.user && session.user.user_metadata && (session.user.user_metadata.full_name || session.user.user_metadata.name);
+    if (meT && !meT.name && gName) {
+      const { error } = await sb.rpc('claim_my_teacher_name', { p_name: gName });
+      if (!error) meT.name = String(gName).trim().slice(0, 40);
+    }
     this.shell();
     this.renderAll();
   },
@@ -573,12 +580,14 @@ const Teacher = {
       <button class="todo rev" data-f="revise"><span>보완 요청 후 재제출 대기</span><span class="n">${rev}</span></button>
       <button class="todo late" data-f="late"><span>마감 지나고 미제출한 학생</span><span class="n">${late}</span></button>
       ${nomail ? `<button class="todo mail" data-f="nomail"><span>이메일 미등록 (로그인 불가)</span><span class="n">${nomail}</span></button>` : ''}
+      ${this.isAdmin && this.teachers.some(t => !t.name) ? `<button class="todo mail" data-open-teachers="1"><span>이름이 없는 선생님 계정</span><span class="n">${this.teachers.filter(t => !t.name).length}</span></button>` : ''}
       ${this.isAdmin && list.some(s => !s.teacher_email) ? `<button class="todo mail" data-tf="__none"><span>담당 교사 미배정</span><span class="n">${list.filter(s => !s.teacher_email).length}</span></button>` : ''}
       ${noconsent ? `<button class="todo mail" data-f="noconsent"><span>개인정보 동의 전</span><span class="n">${noconsent}</span></button>` : ''}
       ${wait ? `<button class="btn primary" id="rvStart">대기 중인 제출물 차례로 검토하기</button>` : ''}
     </div></div>`;
     $('summary').innerHTML = html;
     $('summary').querySelectorAll('.todo').forEach(b => b.onclick = () => {
+      if (b.dataset.openTeachers) { this.openTeachers(); return; }
       if (b.dataset.tf) { $('fteacher').value = b.dataset.tf; $('fstatus').value = ''; }
       else $('fstatus').value = b.dataset.f;
       this.renderRows();
@@ -1086,9 +1095,28 @@ const Teacher = {
     try { await this.load(); this.renderAll(); } catch (e) { list.innerHTML = `<li class="hint">목록을 불러오지 못했습니다. ${esc(dbMsg(e))}</li>`; return; }
     const cnt = e => [...this.students.values()].filter(s => s.teacher_email === e).length;
     list.innerHTML = this.teachers.map(t => `<li>
-      <span class="tpl-name">${esc(this.tName(t.email))}${t.is_admin ? ' <span class="tpl-place">관리자</span>' : ''}${t.email === this.email ? ' <span class="tpl-place me">나</span>' : ''}<small>${esc(t.email)} · 담당 ${cnt(t.email)}명</small></span>
+      <span class="tpl-name" data-namebox="${esc(t.email)}">${t.name ? esc(t.name) : `<span class="warn">이름 없음</span>`}${t.is_admin ? ' <span class="tpl-place">관리자</span>' : ''}${t.email === this.email ? ' <span class="tpl-place me">나</span>' : ''}<small>${esc(t.email)} · 담당 ${cnt(t.email)}명</small></span>
+      <button class="btn sm" data-tchname="${esc(t.email)}">이름 ${t.name ? '수정' : '넣기'}</button>
       ${t.email === this.email ? '' : `<button class="btn sm" data-tchadm="${esc(t.email)}">${t.is_admin ? '관리자 해제' : '관리자로 지정'}</button><button class="btn sm danger" data-tchdel="${esc(t.email)}">삭제</button>`}
     </li>`).join('');
+    list.querySelectorAll('[data-tchname]').forEach(b => b.onclick = () => {
+      const t = this.teachers.find(x => x.email === b.dataset.tchname);
+      const box = list.querySelector(`[data-namebox="${CSS.escape(t.email)}"]`);
+      box.innerHTML = `<input class="in" maxlength="40" value="${esc(t.name || '')}" placeholder="학생에게 보일 이름 (예: 김민수)"><small>${esc(t.email)}</small>`;
+      const inp = box.querySelector('input');
+      inp.focus();
+      b.textContent = '저장';
+      const save = async () => {
+        const v = inp.value.trim();
+        if (!v) { toast('이름을 입력하세요.'); inp.focus(); return; }
+        const { error } = await sb.from('teachers').update({ name: v }).eq('email', t.email);
+        if (error) { toast(dbMsg(error)); return; }
+        toast('이름을 저장했습니다. 학생 화면에도 이 이름으로 보입니다.');
+        this.loadTeachers();
+      };
+      b.onclick = save;
+      inp.onkeydown = e => { if (e.key === 'Enter') save(); };
+    });
     list.querySelectorAll('[data-tchadm]').forEach(b => b.onclick = async () => {
       const t = this.teachers.find(x => x.email === b.dataset.tchadm);
       const { error } = await sb.from('teachers').update({ is_admin: !t.is_admin }).eq('email', t.email);
