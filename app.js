@@ -408,6 +408,18 @@ const Teacher = {
       <div class="mfoot"><button class="btn" data-close="mTpl">닫기</button></div>
     </div></div>
 
+    <div class="modal" id="mTeach" role="dialog" aria-modal="true" aria-labelledby="mTeachT"><div class="mbox">
+      <h2 id="mTeachT">선생님 계정</h2>
+      <p>여기에 있는 구글 계정은 관리 화면에 들어와 모든 학생의 제출물과 피드백을 보고 고칠 수 있습니다. 함께 지도하는 선생님의 학교 구글 이메일을 추가하세요.</p>
+      <div class="tpl-pick">
+        <input class="in" id="teachEmail" type="email" placeholder="선생님 학교 구글 이메일" autocomplete="off" style="flex:1;min-width:200px">
+        <button class="btn primary" id="teachAdd">추가</button>
+      </div>
+      <ul class="tpl-list" id="teachList"></ul>
+      <p class="hint">본인 계정은 여기서 지울 수 없습니다. 추가된 선생님은 사이트 주소로 접속해 구글 로그인만 하면 됩니다.</p>
+      <div class="mfoot"><button class="btn" data-close="mTeach">닫기</button></div>
+    </div></div>
+
     <div class="review" id="review" role="dialog" aria-modal="true" aria-label="제출물 보면서 피드백 쓰기" aria-hidden="true">
       <div class="rv-head">
         <div class="rv-title"><b id="rvName"></b><span id="rvMeta"></span></div>
@@ -438,6 +450,8 @@ const Teacher = {
     $('bTpl').onclick = () => { this.renderTemplates(); this.openModal('mTpl'); };
     $('tFile').onchange = () => { const f = $('tFile').files[0]; $('tPicked').textContent = f ? f.name : ''; };
     $('tGo').onclick = () => this.uploadTemplate();
+    $('teachAdd').onclick = () => this.addTeacher();
+    $('teachEmail').onkeydown = e => { if (e.key === 'Enter') this.addTeacher(); };
     $('bCsv').onclick = () => this.exportCsv();
     $('bReload').onclick = async () => { try { await this.load(); this.renderAll(); toast('새로 불러왔습니다.'); } catch (e) { toast(dbMsg(e)); } };
     $('dClose').onclick = () => this.closeDrawer();
@@ -483,8 +497,9 @@ const Teacher = {
     const anyExtra = [...this.students.values()].some(s => s.extra_required);
     $('dues').innerHTML = DUES.filter(g => !g.extra || anyExtra).map(g => { const v = dueFrom(c, g.key); return v
       ? `<span>${g.label} <b>${fmtDate(v)}</b>${ddayTag(v)}</span>`
-      : `<span>${g.label} <b>미정</b></span>`; }).join('') + '<button class="linkbtn" id="bSet">마감일 설정</button>';
+      : `<span>${g.label} <b>미정</b></span>`; }).join('') + '<button class="linkbtn" id="bSet">마감일 설정</button><button class="linkbtn" id="bTeachers">선생님 계정</button>';
     $('bSet').onclick = () => this.openSettings();
+    $('bTeachers').onclick = () => this.openTeachers();
   },
 
   renderSummary() {
@@ -997,6 +1012,41 @@ const Teacher = {
       ['rvSave', 'rvSaveGo'].forEach(id => { if ($(id)) $(id).disabled = false; });
       return false;
     }
+  },
+
+  /* ----- 선생님 계정 ----- */
+  async openTeachers() {
+    this.openModal('mTeach');
+    await this.loadTeachers();
+  },
+
+  async loadTeachers() {
+    const list = $('teachList');
+    list.innerHTML = '<li class="hint">불러오는 중입니다.</li>';
+    const { data, error } = await sb.from('teachers').select('*').order('email');
+    if (error) { list.innerHTML = `<li class="hint">목록을 불러오지 못했습니다. ${esc(dbMsg(error))}</li>`; return; }
+    list.innerHTML = data.map(t => `<li>
+      <span class="tpl-name">${esc(t.email)}</span>
+      ${t.email === this.email ? '<span class="tpl-place">나</span>' : `<button class="btn sm danger" data-tchdel="${esc(t.email)}">삭제</button>`}
+    </li>`).join('');
+    list.querySelectorAll('[data-tchdel]').forEach(b => b.onclick = async () => {
+      if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = '정말 삭제'; setTimeout(() => { if (b.isConnected) { b.classList.remove('armed'); b.textContent = '삭제'; } }, 3000); return; }
+      const { error: e2 } = await sb.from('teachers').delete().eq('email', b.dataset.tchdel);
+      if (e2) { toast(dbMsg(e2)); return; }
+      toast('선생님 계정을 삭제했습니다.');
+      this.loadTeachers();
+    });
+  },
+
+  async addTeacher() {
+    const email = $('teachEmail').value.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('이메일 형식을 확인하세요.'); $('teachEmail').focus(); return; }
+    if ([...this.students.values()].some(s => s.email === email)) { toast('학생으로 등록된 이메일입니다. 학생 명단에서 먼저 빼 주세요.'); return; }
+    const { error } = await sb.from('teachers').insert({ email });
+    if (error) { toast(error.code === '23505' ? '이미 추가된 선생님입니다.' : dbMsg(error)); return; }
+    $('teachEmail').value = '';
+    toast(`${email} 계정을 선생님으로 추가했습니다.`);
+    this.loadTeachers();
   },
 
   /* ----- 양식 관리 ----- */

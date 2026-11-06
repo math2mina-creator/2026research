@@ -354,3 +354,4 @@ img.sig{display:block;margin-top:6px;max-width:240px;width:100%;background:#fff;
 .linkbtn.plain:hover{text-decoration:underline}
 .pg-msg{margin:14px 0 0;color:var(--ink-2);font-size:14.5px}
 .card.flash{box-shadow:0 0 0 3px var(--blue-bg),0 0 0 4px var(--blue);transition:box-shadow .3s}
+.dues .linkbtn+.linkbtn{margin-left:4px}
