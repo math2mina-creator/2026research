@@ -325,3 +325,32 @@ img.sig{display:block;margin-top:6px;max-width:240px;width:100%;background:#fff;
 .topic-actions{display:flex;align-items:center;gap:8px;max-width:62ch;margin-top:8px}
 .topic-actions .hint{flex:1;margin:0}
 .tnew{display:inline-block;margin-right:6px;padding:0 6px;border-radius:4px;background:var(--amber-bg);color:var(--amber);font-size:11.5px;font-weight:600;vertical-align:1px}
+
+/* student progress */
+.progress{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-top:22px}
+.pg-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.pg-head h2{font-family:"Gowun Batang",serif;font-size:20px;margin:0}
+.pg-num{font-size:14px;color:var(--ink-2)}
+.pg-num b{font-family:"Gowun Batang",serif;font-size:26px;color:var(--stamp);margin-right:2px}
+.pg-num span{color:var(--ink-3)}
+.pg-bar{display:flex;gap:4px;margin:12px 0 14px}
+.pg-seg{flex:1;height:8px;border-radius:4px;background:var(--none-bg)}
+.pg-seg.waiting{background:var(--blue)} .pg-seg.revise{background:var(--amber)} .pg-seg.done{background:var(--stamp)}
+.pg-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.pg-tile{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;background:var(--paper);border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;cursor:pointer}
+.pg-tile:hover{border-color:var(--line)}
+.pg-tile.done{border-color:var(--stamp-bg)}
+.pg-tile.revise{border-color:var(--amber)}
+.pg-name{font-weight:600;font-size:14.5px;display:flex;align-items:center;gap:6px}
+.pg-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--stamp)}
+.pg-due{font-size:12.5px;color:var(--ink-3)}
+.pg-todo{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-2)}
+.pg-todo h3{font-size:14px;margin:0 0 6px;color:var(--ink-2)}
+.pg-todo ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.pg-todo li{position:relative;padding-left:16px;font-size:14.5px}
+.pg-todo li::before{content:"";position:absolute;left:2px;top:9px;width:7px;height:7px;border-radius:50%;background:var(--ink-3)}
+.pg-todo li.rev::before{background:var(--amber)} .pg-todo li.new::before{background:var(--stamp)} .pg-todo li.late::before{background:var(--stamp)}
+.linkbtn.plain{color:inherit;text-decoration:none;text-align:left;font-size:inherit}
+.linkbtn.plain:hover{text-decoration:underline}
+.pg-msg{margin:14px 0 0;color:var(--ink-2);font-size:14.5px}
+.card.flash{box-shadow:0 0 0 3px var(--blue-bg),0 0 0 4px var(--blue);transition:box-shadow .3s}

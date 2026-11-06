@@ -1292,6 +1292,49 @@ const Student = {
     sb.rpc('mark_feedback_seen').then(({ error }) => { if (error) console.warn(error); });
   },
 
+  progressHTML() {
+    const items = stagesFor(this.me);
+    const rows = items.map(g => {
+      const sub = this.subs[g.key] || {};
+      const k = sub.status || 'none';
+      const due = dueFrom(this.settings, g.due);
+      const dd = dday(due);
+      const unread = this.events.filter(e => e.stage === g.key && this.unseen.has(e.id)).length;
+      return { g, k, due, dd, unread };
+    });
+    const done = rows.filter(r => r.k === 'done').length;
+    const submitted = rows.filter(r => r.k !== 'none').length;
+    const label = g => g.group === 'report' ? g.label : g.full;
+
+    /* 다음에 할 일: 보완 요청 → 안 읽은 피드백 → 마감 지난 미제출 → 마감 가까운 미제출 */
+    const todo = [];
+    rows.filter(r => r.k === 'revise').forEach(r => todo.push({ g: r.g, cls: 'rev', text: `<b>${label(r.g)}</b> 보완 요청을 받았어요. 피드백을 보고 수정본을 다시 제출하세요.` }));
+    rows.filter(r => r.unread && r.k !== 'revise').forEach(r => todo.push({ g: r.g, cls: 'new', text: `<b>${label(r.g)}</b>에 새 피드백이 있어요.` }));
+    rows.filter(r => r.k === 'none' && r.dd !== null && r.dd < 0).forEach(r => todo.push({ g: r.g, cls: 'late', text: `<b>${label(r.g)}</b> 마감(${fmtDate(r.due)})이 지났어요. 지금이라도 제출하고 선생님께 말씀드리세요.` }));
+    rows.filter(r => r.k === 'none' && !(r.dd !== null && r.dd < 0)).sort((a, b) => (a.dd ?? 9999) - (b.dd ?? 9999)).slice(0, 2)
+      .forEach(r => todo.push({ g: r.g, cls: '', text: `<b>${label(r.g)}</b> 제출하기${r.due ? ` · 마감 ${fmtDate(r.due)} ${r.dd === 0 ? '(오늘)' : `(D-${r.dd})`}` : ''}` }));
+    const waiting = rows.filter(r => r.k === 'waiting').map(r => label(r.g));
+
+    const seg = rows.map(r => `<span class="pg-seg ${r.k}" title="${label(r.g)}: ${ST[r.k].label}"></span>`).join('');
+    const tiles = rows.map(r => `<button class="pg-tile ${r.k}" data-goto="${r.g.key}">
+        <span class="pg-name">${label(r.g)}${r.unread ? '<i class="pg-dot" aria-label="새 피드백"></i>' : ''}</span>
+        <span class="pill ${r.k}">${ST[r.k].label}</span>
+        <span class="pg-due">${r.due ? `${fmtDate(r.due)} ${r.k === 'none' ? ddayTag(r.due) : ''}` : '마감 미정'}</span>
+      </button>`).join('');
+    const msg = done === rows.length ? '모든 제출물이 확인 완료됐어요. 수고했어요!'
+      : todo.length ? '' : waiting.length ? `${waiting.join(', ')}은(는) 선생님이 확인하고 있어요. 피드백이 오면 여기에 표시돼요.` : '';
+    return `<section class="progress" aria-label="나의 진행 상황">
+      <div class="pg-head">
+        <h2>나의 진행 상황</h2>
+        <div class="pg-num"><b>${done}</b> / ${rows.length} 확인 완료 <span>· 제출 ${submitted}개</span></div>
+      </div>
+      <div class="pg-bar">${seg}</div>
+      <div class="pg-tiles">${tiles}</div>
+      ${todo.length ? `<div class="pg-todo"><h3>다음에 할 일</h3><ul>${todo.map(t => `<li class="${t.cls}"><button class="linkbtn plain" data-goto="${t.g.key}">${t.text}</button></li>`).join('')}</ul></div>` : ''}
+      ${msg ? `<p class="pg-msg">${msg}</p>` : ''}
+    </section>`;
+  },
+
   topicView() {
     const t = this.me.topic;
     return t
@@ -1378,6 +1421,7 @@ const Student = {
         <p class="sub">${esc(me.sid || '')}${me.cls ? ` · ${esc(me.cls)}반` : ''} · ${esc(this.settings.program_name || '개인연구')}</p>
         <div class="me-topic" id="topicBox">${this.topicView()}</div>
       </div></header>
+      ${this.progressHTML()}
       ${this.tplLinks('all', true)}
       <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요. 부분마다 마감일이 다를 수 있어요.</span></h2>
       ${this.tplLinks('report', true)}
@@ -1389,6 +1433,13 @@ const Student = {
     bindLogout();
     app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
     this.bindTopic();
+    app.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {
+      const card = app.querySelector(`.card[data-stage="${b.dataset.goto}"]`);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      card.classList.add('flash');
+      setTimeout(() => card.classList.remove('flash'), 1200);
+    });
     app.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => downloadTemplate(this.templates.find(t => t.id === b.dataset.tpl)));
     app.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => app.querySelector(`[data-file="${b.dataset.pick}"]`).click());
     app.querySelectorAll('[data-file]').forEach(inp => inp.onchange = () => { if (inp.files[0]) this.upload(inp.dataset.file, inp.files[0]); });
