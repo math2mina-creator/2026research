@@ -267,3 +267,25 @@ code.ex{display:block;white-space:pre;background:var(--paper);border:1px solid v
 .sign-pad{display:block;width:100%;height:170px;background:#fff;border:1.5px dashed var(--line);border-radius:8px;touch-action:none;cursor:crosshair}
 .sign-foot{display:flex;justify-content:space-between;gap:12px;margin-top:8px;font-size:14px;color:var(--ink-2)}
 img.sig{display:block;margin-top:6px;max-width:240px;width:100%;background:#fff;border:1px solid var(--line);border-radius:6px}
+
+/* report parts */
+.parts{display:flex;flex-direction:column;gap:6px;margin:12px 0 10px}
+.part-row{display:grid;grid-template-columns:34px 1fr 44px;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+.part-row .pn{text-align:right;font-variant-numeric:tabular-nums}
+.bar.thin{height:6px;margin:0}
+.chips{display:flex;gap:4px;flex-wrap:wrap}
+.chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:500;white-space:nowrap}
+.chip.none{background:var(--none-bg);color:var(--ink-3)}
+.chip.waiting{background:var(--blue-bg);color:var(--blue)}
+.chip.revise{background:var(--amber-bg);color:var(--amber)}
+.chip.done{background:var(--stamp-bg);color:var(--stamp)}
+.chip.pressed{animation:chippop .35s ease-out}
+@keyframes chippop{0%{transform:scale(1.4)}100%{transform:scale(1)}}
+.group-h{font-family:"Gowun Batang",serif;font-size:19px;margin:0 0 4px}
+.stage-h h3 small.desc{display:block;font-size:13px;font-weight:400;color:var(--ink-3);margin-top:2px}
+.group-title{font-family:"Gowun Batang",serif;font-size:22px;margin:32px 0 0}
+.group-title span{display:block;font-family:"IBM Plex Sans KR",sans-serif;font-size:14px;font-weight:400;color:var(--ink-2);margin-top:4px}
+.cards.one{grid-template-columns:minmax(0,1fr)}
+.cards.three{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:14px}
+.card .due b{color:var(--ink);font-weight:600}
+@media (max-width:1000px){.cards.three{grid-template-columns:minmax(0,1fr)}}

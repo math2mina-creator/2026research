@@ -13,9 +13,15 @@ const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
 const STAGES = [
-  { key: 'plan', label: '연구계획서', due: 'plan_due' },
-  { key: 'report', label: '최종보고서', due: 'report_due' }
+  { key: 'plan', label: '연구계획서', full: '연구계획서', due: 'plan_due', group: 'plan' },
+  { key: 'intro', label: '서론', full: '최종보고서 1. 서론', desc: '연구 주제 선정 이유, 연구 주제와 관련된 연구 동향 분석', due: 'report_due', group: 'report' },
+  { key: 'body', label: '본론', full: '최종보고서 2. 본론', desc: '연구 내용 설명', due: 'report_due', group: 'report' },
+  { key: 'conclusion', label: '결론', full: '최종보고서 3. 결론', desc: '보고서 결론', due: 'report_due', group: 'report' }
 ];
+const PARTS = STAGES.filter(g => g.group === 'report');
+const stageMap = () => Object.fromEntries(STAGES.map(g => [g.key, '']));
+const evMap = () => Object.fromEntries(STAGES.map(g => [g.key, []]));
+const DUES = [{ key: 'plan_due', label: '연구계획서' }, { key: 'report_due', label: '최종보고서' }];
 const ST = {
   none: { label: '미제출', color: 'var(--none)' },
   waiting: { label: '피드백 대기', color: 'var(--blue)' },
@@ -238,7 +244,7 @@ sb.auth.onAuthStateChange((event, session) => {
    ========================================================= */
 const Teacher = {
   email: '', settings: {}, students: new Map(),
-  openId: null, isNew: false, draft: null, orig: null, fb: { plan: '', report: '' }, delEvents: new Set(), dirty: false, justStamped: null,
+  openId: null, isNew: false, draft: null, orig: null, fb: stageMap(), delEvents: new Set(), dirty: false, justStamped: null,
 
   blank() { return { status: 'none', submitted_at: null, link: '', file_path: null, file_name: null }; },
 
@@ -264,10 +270,10 @@ const Teacher = {
     const [st, sub, ev, notes, set] = res.map(r => r.data);
     this.settings = set || {};
     const m = new Map();
-    for (const s of st) m.set(s.id, { ...s, field: s.field || '', topic: s.topic || '', email: s.email || '', sid: s.sid || '', cls: s.cls || '', memo: '', plan: this.blank(), report: this.blank(), ev: { plan: [], report: [] } });
+    for (const s of st) m.set(s.id, { ...s, field: s.field || '', topic: s.topic || '', email: s.email || '', sid: s.sid || '', cls: s.cls || '', memo: '', ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() });
     for (const n of notes) if (m.has(n.student_id)) m.get(n.student_id).memo = n.memo || '';
-    for (const x of sub) if (m.has(x.student_id)) m.get(x.student_id)[x.stage] = { ...this.blank(), ...x, link: x.link || '' };
-    for (const e of ev) if (m.has(e.student_id)) m.get(e.student_id).ev[e.stage].push(e);
+    for (const x of sub) if (m.has(x.student_id) && STAGES.some(g => g.key === x.stage)) m.get(x.student_id)[x.stage] = { ...this.blank(), ...x, link: x.link || '' };
+    for (const e of ev) if (m.has(e.student_id) && m.get(e.student_id).ev[e.stage]) m.get(e.student_id).ev[e.stage].push(e);
     this.students = m;
   },
 
@@ -292,7 +298,7 @@ const Teacher = {
         <option value="wait">피드백 대기</option>
         <option value="revise">보완 요청 중</option>
         <option value="plan-none">계획서 미제출</option>
-        <option value="report-none">보고서 미제출</option>
+        <option value="report-none">보고서 미제출 부분 있음</option>
         <option value="late">마감 지남 미제출</option>
         <option value="alldone">모두 확인 완료</option>
         <option value="nomail">이메일 미등록</option>
@@ -412,8 +418,8 @@ const Teacher = {
     const c = this.settings;
     $('title').textContent = c.program_name || '개인연구 제출·피드백 관리';
     document.title = $('title').textContent;
-    $('dues').innerHTML = STAGES.map(g => c[g.due]
-      ? `<span>${g.label} 마감 <b>${fmtDate(c[g.due])}</b>${ddayTag(c[g.due])}</span>`
+    $('dues').innerHTML = DUES.map(g => c[g.key]
+      ? `<span>${g.label} 마감 <b>${fmtDate(c[g.key])}</b>${ddayTag(c[g.key])}</span>`
       : `<span>${g.label} 마감 <b>미정</b></span>`).join('') + '<button class="linkbtn" id="bSet">마감일 설정</button>';
     $('bSet').onclick = () => this.openSettings();
   },
@@ -421,14 +427,15 @@ const Teacher = {
   renderSummary() {
     const list = [...this.students.values()];
     const n = list.length;
-    let html = '';
-    for (const g of STAGES) {
-      const cnt = { none: 0, waiting: 0, revise: 0, done: 0 };
-      list.forEach(s => cnt[s[g.key].status || 'none']++);
-      const segs = ORDER.filter(k => k !== 'none').map(k => n && cnt[k] ? `<span style="width:${cnt[k] / n * 100}%;background:${ST[k].color}" title="${ST[k].label} ${cnt[k]}명"></span>` : '').join('');
-      html += `<div class="sum"><h2>${g.label}</h2><div class="big">${n - cnt.none}<small>/ ${n}명 제출</small></div><div class="bar">${segs}</div>
-        <div class="legend">${ORDER.map(k => `<span><i style="background:${ST[k].color}"></i>${ST[k].label} ${cnt[k]}</span>`).join('')}</div></div>`;
-    }
+    const count = key => { const c = { none: 0, waiting: 0, revise: 0, done: 0 }; list.forEach(s => c[s[key].status || 'none']++); return c; };
+    const bar = (cnt, thin) => `<div class="bar${thin ? ' thin' : ''}">${ORDER.filter(k => k !== 'none').map(k => n && cnt[k] ? `<span style="width:${cnt[k] / n * 100}%;background:${ST[k].color}" title="${ST[k].label} ${cnt[k]}명"></span>` : '').join('')}</div>`;
+    const legend = cnt => `<div class="legend">${ORDER.map(k => `<span><i style="background:${ST[k].color}"></i>${ST[k].label} ${cnt[k]}</span>`).join('')}</div>`;
+    const pc = count('plan');
+    let html = `<div class="sum"><h2>연구계획서</h2><div class="big">${n - pc.none}<small>/ ${n}명 제출</small></div>${bar(pc)}${legend(pc)}</div>`;
+    const allIn = list.filter(s => PARTS.every(g => s[g.key].status !== 'none')).length;
+    html += `<div class="sum"><h2>최종보고서</h2><div class="big">${allIn}<small>/ ${n}명 세 부분 모두 제출</small></div>
+      <div class="parts">${PARTS.map(g => { const c = count(g.key); return `<div class="part-row"><span class="pl">${g.label}</span>${bar(c, true)}<span class="pn">${n - c.none}/${n}</span></div>`; }).join('')}</div>
+      <div class="legend">${ORDER.filter(k => k !== 'none').map(k => `<span><i style="background:${ST[k].color}"></i>${ST[k].label}</span>`).join('')}</div></div>`;
     const wait = list.reduce((a, s) => a + STAGES.filter(g => s[g.key].status === 'waiting').length, 0);
     const rev = list.reduce((a, s) => a + STAGES.filter(g => s[g.key].status === 'revise').length, 0);
     const late = list.filter(s => STAGES.some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]))).length;
@@ -466,12 +473,24 @@ const Teacher = {
     if (f === 'wait') return STAGES.some(g => s[g.key].status === 'waiting');
     if (f === 'revise') return STAGES.some(g => s[g.key].status === 'revise');
     if (f === 'plan-none') return s.plan.status === 'none';
-    if (f === 'report-none') return s.report.status === 'none';
+    if (f === 'report-none') return PARTS.some(g => s[g.key].status === 'none');
     if (f === 'late') return STAGES.some(g => s[g.key].status === 'none' && isPast(this.settings[g.due]));
     if (f === 'alldone') return STAGES.every(g => s[g.key].status === 'done');
     if (f === 'nomail') return !s.email;
     if (f === 'noconsent') return !!s.email && !hasConsent(s);
     return true;
+  },
+
+  partsCell(s) {
+    const due = this.settings.report_due;
+    const chips = PARTS.map(g => {
+      const k = s[g.key].status || 'none';
+      return `<span class="chip ${k}${this.justStamped === s.id + g.key ? ' pressed' : ''}" title="${g.full}: ${ST[k].label}">${k === 'done' ? '✓ ' : ''}${g.label}</span>`;
+    }).join('');
+    const missing = PARTS.filter(g => s[g.key].status === 'none').length;
+    const meta = missing && isPast(due) ? '<div class="meta warn">마감 지남</div>'
+      : PARTS.some(g => s[g.key].status === 'waiting') ? '<div class="meta">피드백 대기 있음</div>' : '';
+    return `<div class="chips">${chips}</div>${meta}`;
   },
 
   stageCell(s, g) {
@@ -500,7 +519,7 @@ const Teacher = {
       <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${!s.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(s) ? '' : '<span class="nomail">동의 전</span>'}</td>
       <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${esc(s.topic) || '주제 미정'}</div></td>
       <td class="c-plan">${this.stageCell(s, STAGES[0])}</td>
-      <td class="c-report">${this.stageCell(s, STAGES[1])}</td>
+      <td class="c-report">${this.partsCell(s)}</td>
       <td class="c-recent"><span class="recent">${rel(this.lastActivity(s))}</span></td></tr>`).join('');
     this.justStamped = null;
     $('rows').querySelectorAll('tr').forEach(tr => {
@@ -523,11 +542,11 @@ const Teacher = {
     if (id && !src) return;
     this.isNew = !id;
     this.openId = id || null;
-    const base = src ? clone(src) : { id: null, sid: '', name: '', cls: '', email: '', field: '', topic: '', memo: '', plan: this.blank(), report: this.blank(), ev: { plan: [], report: [] } };
+    const base = src ? clone(src) : { id: null, sid: '', name: '', cls: '', email: '', field: '', topic: '', memo: '', ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() };
     for (const g of STAGES) base[g.key].date = dateOf(base[g.key].submitted_at);
     this.draft = base;
     this.orig = clone(base);
-    this.fb = { plan: '', report: '' };
+    this.fb = stageMap();
     this.delEvents = new Set();
     this.dirty = false;
     this.renderDrawer();
@@ -575,7 +594,8 @@ const Teacher = {
         ${e.kind !== 'submit' ? `<button class="del" data-del="${esc(e.id)}" aria-label="이 기록 삭제">삭제</button>` : ''}</div>${body}</li>`;
     }).join('');
     return `<section class="stage" data-stage="${g.key}">
-      <div class="stage-h"><h3>${g.label}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
+      ${g.key === PARTS[0].key ? '<h3 class="group-h">최종보고서</h3>' : ''}
+      <div class="stage-h"><h3>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.label}${g.desc ? `<small class="desc">${g.desc}</small>` : ''}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
       ${st.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(st.file_name || '제출 파일')}</span><button class="btn sm primary" data-review="${g.key}">보면서 피드백 쓰기</button></div>` : ''}
       <div class="seg" role="radiogroup" aria-label="${g.label} 상태">
         ${['none', 'waiting', 'revise', 'done'].map(s => `<label class="${k === s ? 'sel-' + s : ''}"><input type="radio" name="st-${g.key}" value="${s}" ${k === s ? 'checked' : ''}><span>${ST[s].label}</span></label>`).join('')}
@@ -802,7 +822,7 @@ const Teacher = {
     if (!it) { this.closeReview(true); return; }
     if (loadDoc) { rv.status = it.st.status; rv.fb = ''; rv.dirty = false; }
     $('rvName').textContent = `${it.s.sid ? it.s.sid + ' ' : ''}${it.s.name}`;
-    $('rvMeta').textContent = ` ${it.g.label}${it.st.submitted_at ? ' · ' + fmtDT(it.st.submitted_at) + ' 제출' : ''}`;
+    $('rvMeta').textContent = ` ${it.g.full}${it.st.submitted_at ? ' · ' + fmtDT(it.st.submitted_at) + ' 제출' : ''}`;
     $('rvPos').textContent = rv.queue.length > 1 ? `${rv.idx + 1} / ${rv.queue.length}` : '';
     $('rvPrev').hidden = $('rvNext').hidden = rv.queue.length < 2;
     $('rvPrev').disabled = rv.idx === 0;
@@ -993,12 +1013,11 @@ const Teacher = {
   exportCsv() {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const lastNote = arr => (arr.find(e => e.kind === 'feedback' && e.note) || {}).note || '';
-    const head = ['학번', '이름', '반', '이메일', '연구 분야', '연구 주제', '계획서 상태', '계획서 제출일', '계획서 최근 피드백', '보고서 상태', '보고서 제출일', '보고서 최근 피드백', '개인정보 동의일', '지도 메모'];
+    const head = ['학번', '이름', '반', '이메일', '연구 분야', '연구 주제', ...STAGES.flatMap(g => [g.full + ' 상태', g.full + ' 제출일', g.full + ' 최근 피드백']), '개인정보 동의일', '지도 메모'];
     const list = [...this.students.values()].sort((a, b) => (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }));
     const lines = [head.map(q).join(',')].concat(list.map(s => [
       s.sid, s.name, s.cls, s.email, s.field, s.topic,
-      ST[s.plan.status].label, dateOf(s.plan.submitted_at), lastNote(s.ev.plan),
-      ST[s.report.status].label, dateOf(s.report.submitted_at), lastNote(s.ev.report), hasConsent(s) ? dateOf(s.consent_at) : '', s.memo
+      ...STAGES.flatMap(g => [ST[s[g.key].status].label, dateOf(s[g.key].submitted_at), lastNote(s.ev[g.key])]), hasConsent(s) ? dateOf(s.consent_at) : '', s.memo
     ].map(q).join(',')));
     const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -1164,8 +1183,8 @@ const Student = {
       return `<li class="k-status"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>상태가 바뀌었습니다</span>${e.status ? `<span class="pill ${e.status}">${ST[e.status].label}</span>` : ''}</div></li>`;
     }).join('');
     return `<section class="card" data-stage="${g.key}">
-      <div class="card-h"><h2>${g.label}</h2>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
-      <p class="due">${due ? `마감 ${fmtDate(due)}${ddayTag(due)}` : '마감일 미정'}</p>
+      <div class="card-h"><h2>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.label}</h2>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
+      <p class="due">${g.desc ? `<b>${g.desc}</b><br>` : ''}${due ? `마감 ${fmtDate(due)}${ddayTag(due)}` : '마감일 미정'}</p>
       <div class="status-line"><span class="pill ${k}">${ST[k].label}</span>${sub.submitted_at ? `<span class="hint">${fmtDT(sub.submitted_at)} 제출</span>` : ''}</div>
       <p class="hint" style="margin-bottom:12px">${guide}</p>
       ${sub.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(sub.file_name || '제출 파일')}</span><button class="btn sm" data-open="${esc(sub.file_path)}">열기</button></div>` : ''}
@@ -1186,7 +1205,9 @@ const Student = {
         <p class="sub">${esc(me.sid || '')}${me.cls ? ` · ${esc(me.cls)}반` : ''} · ${esc(this.settings.program_name || '개인연구')}</p>
         <p class="me-topic">${me.topic ? '연구 주제: ' + esc(me.topic) : '연구 주제가 아직 등록되지 않았습니다.'}</p>
       </div></header>
-      <div class="cards">${STAGES.map(g => this.card(g)).join('')}</div>`;
+      <div class="cards one">${this.card(STAGES[0])}</div>
+      <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요${this.settings.report_due ? ` · 마감 ${fmtDate(this.settings.report_due)}` : ''}</span></h2>
+      <div class="cards three">${PARTS.map(g => this.card(g)).join('')}</div>`;
     bindLogout();
     app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
     app.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => app.querySelector(`[data-file="${b.dataset.pick}"]`).click());
