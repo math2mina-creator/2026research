@@ -401,3 +401,9 @@ img.sig{display:block;margin-top:6px;max-width:240px;width:100%;background:#fff;
 .ann .ann-body{margin:8px 0 2px 18px;color:var(--ink)}
 .ann-more{margin-top:0}
 #annMore{margin-top:8px;font-size:14px}
+
+/* bulk download */
+.zip-stages{display:flex;flex-wrap:wrap;gap:8px 16px}
+.zip-progress{margin:6px 0 4px}
+.zip-progress .bar{margin:6px 0}
+.zip-progress .hint{margin:0}

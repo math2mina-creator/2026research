@@ -146,6 +146,21 @@ function loadHwpxLib() {
   }
   return hwpxLibPromise;
 }
+let zipLibPromise = null;
+function loadZipLib() {
+  if (window.ZIPjs) return Promise.resolve(window.ZIPjs);
+  if (!zipLibPromise) {
+    zipLibPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'vendor/zip.min.js';
+      s.onload = () => window.ZIPjs ? resolve(window.ZIPjs) : reject(new Error('zip'));
+      s.onerror = () => { zipLibPromise = null; reject(new Error('zip')); };
+      document.head.appendChild(s);
+    });
+  }
+  return zipLibPromise;
+}
+const safeName = s => String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120) || '파일';
 async function downloadBlob(path) {
   const { data, error } = await sb.storage.from(BUCKET).download(path);
   if (error || !data) throw error || new Error('download');
@@ -391,6 +406,7 @@ const Teacher = {
       <button class="btn admin-only" id="bTpl">양식 관리</button>
       <button class="btn" id="bBulk">명단 붙여넣기</button>
       <button class="btn" id="bCsv">CSV 내보내기</button>
+      <button class="btn" id="bZip">전체 내려받기</button>
       <button class="btn primary" id="bAdd">학생 추가</button>
     </div>
     <p class="count" id="count"></p>
@@ -405,7 +421,7 @@ const Teacher = {
       <div class="guard" id="guard"><span style="flex:1">저장하지 않은 변경이 있습니다.</span>
         <button class="btn" id="gKeep">계속 편집</button><button class="btn danger armed" id="gDrop">버리고 닫기</button></div>
       <div class="dbody" id="dBody"></div>
-      <div class="dfoot"><button class="btn danger" id="dDel">학생 삭제</button><span class="msg" id="dMsg"></span><button class="btn primary" id="dSave">저장</button></div>
+      <div class="dfoot"><button class="btn danger" id="dDel">학생 삭제</button><button class="btn sm" id="dZip">이 학생 파일 받기</button><span class="msg" id="dMsg"></span><button class="btn primary" id="dSave">저장</button></div>
     </aside>
 
     <div class="modal" id="mBulk" role="dialog" aria-modal="true" aria-labelledby="mBulkT"><div class="mbox">
@@ -481,6 +497,21 @@ const Teacher = {
       <div class="mfoot"><span class="msg" id="asMsg"></span><button class="btn" data-close="mAssign">취소</button><button class="btn primary" id="asGo">저장</button></div>
     </div></div>
 
+    <div class="modal" id="mZip" role="dialog" aria-modal="true" aria-labelledby="mZipT"><div class="mbox">
+      <h2 id="mZipT">전체 내려받기</h2>
+      <p>학생들이 낸 파일을 zip 하나로 받습니다. 명단·제출 현황과 피드백 기록도 엑셀로 열 수 있는 CSV로 함께 들어갑니다. 서버 장애에 대비해 마감일마다 받아서 학교 드라이브나 컴퓨터에 보관해 두세요.</p>
+      <div class="field"><label class="l">받을 학생</label>
+        <div class="tpl-pick"><label class="agree small" style="margin:0"><input type="radio" name="zScope" value="all" checked> <span id="zAllLabel">전체</span></label>
+        <label class="agree small" style="margin:0"><input type="radio" name="zScope" value="shown"> <span id="zShownLabel">지금 목록에 보이는 학생</span></label></div></div>
+      <div class="field"><label class="l">받을 항목</label><div class="zip-stages" id="zStages"></div></div>
+      <div class="field"><label class="l">폴더 정리</label>
+        <div class="tpl-pick"><label class="agree small" style="margin:0"><input type="radio" name="zLayout" value="student" checked> <span>학생별 폴더</span></label>
+        <label class="agree small" style="margin:0"><input type="radio" name="zLayout" value="stage"> <span>항목별 폴더 (서론끼리, 본론끼리)</span></label></div></div>
+      <label class="agree small"><input type="checkbox" id="zOld"> <span>보완 전에 냈던 이전 파일도 함께 받기</span></label>
+      <div class="zip-progress" id="zProg" hidden><div class="bar"><span id="zBar" style="width:0;background:var(--blue)"></span></div><span class="hint" id="zMsg"></span></div>
+      <div class="mfoot"><span class="msg" id="zCount"></span><button class="btn" data-close="mZip">닫기</button><button class="btn primary" id="zGo">내려받기</button></div>
+    </div></div>
+
     <div class="modal" id="mAnn" role="dialog" aria-modal="true" aria-labelledby="mAnnT"><div class="mbox wide">
       <h2 id="mAnnT">공지사항</h2>
       <p id="annIntro"></p>
@@ -548,6 +579,12 @@ const Teacher = {
     $('fteacher').addEventListener('input', () => this.renderRows());
     $('teachEmail').onkeydown = e => { if (e.key === 'Enter') this.addTeacher(); };
     $('bCsv').onclick = () => this.exportCsv();
+    $('bZip').onclick = () => this.openZip();
+    $('zGo').onclick = () => this.runZip();
+    $('dZip').onclick = () => {
+      if (this.isNew || !this.openId) return;
+      this.runZip({ ids: [this.openId], stages: STAGES.map(g => g.key), layout: 'student', old: true });
+    };
     $('bReload').onclick = async () => { try { await this.load(); this.renderAll(); toast('새로 불러왔습니다.'); } catch (e) { toast(dbMsg(e)); } };
     $('dClose').onclick = () => this.closeDrawer();
     $('scrim').onclick = () => this.closeDrawer();
@@ -785,6 +822,7 @@ const Teacher = {
     else { m.textContent = this.draft?.updated_at ? '마지막 저장 ' + fmtDT(this.draft.updated_at) : ''; m.className = 'msg'; }
     $('dSave').disabled = !this.dirty;
     $('dDel').hidden = this.isNew || !this.isAdmin;
+    $('dZip').hidden = this.isNew;
     $('dDel').classList.remove('armed');
     $('dDel').textContent = '학생 삭제';
   },
@@ -1464,16 +1502,137 @@ const Teacher = {
     this.renderAll();
     toast('설정을 저장했습니다.');
   },
-  exportCsv() {
+  csvRoster(list) {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const lastNote = arr => (arr.find(e => e.kind === 'feedback' && e.note) || {}).note || '';
     const head = ['학번', '이름', '반', '담당 교사', '이메일', '연구 분야', '연구 주제', ...STAGES.flatMap(g => [g.full + ' 상태', g.full + ' 제출일', g.full + ' 최근 피드백']), '개인정보 동의일', '지도 메모'];
-    const list = [...this.students.values()].sort((a, b) => (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }));
     const lines = [head.map(q).join(',')].concat(list.map(s => [
       s.sid, s.name, s.cls, this.tName(s.teacher_email), s.email, s.field, s.topic,
       ...STAGES.flatMap(g => applies(s, g) ? [ST[s[g.key].status].label, dateOf(s[g.key].submitted_at), lastNote(s.ev[g.key])] : ['해당 없음', '', '']), hasConsent(s) ? dateOf(s.consent_at) : '', s.memo
     ].map(q).join(',')));
-    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    return '\uFEFF' + lines.join('\r\n');
+  },
+
+  csvFeedback(list) {
+    const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+    const kind = { submit: '학생 제출', feedback: '피드백', status: '상태 변경' };
+    const rows = [['학번', '이름', '항목', '시각', '종류', '상태', '내용·파일', '학생 읽음'].map(q).join(',')];
+    list.forEach(s => stagesFor(s).forEach(g => [...s.ev[g.key]].sort((a, b) => a.created_at.localeCompare(b.created_at)).forEach(e => rows.push([
+      s.sid, s.name, g.full, fmtDT(e.created_at), kind[e.kind] || e.kind, e.status ? ST[e.status].label : '',
+      e.kind === 'submit' ? (e.file_name || '') : (e.note || ''), e.kind === 'feedback' ? (e.seen_at ? fmtDT(e.seen_at) : '안 읽음') : ''
+    ].map(q).join(',')))));
+    return '\uFEFF' + rows.join('\r\n');
+  },
+
+  sortedStudents(list) {
+    return [...list].sort((a, b) => (a.sid || '~').localeCompare(b.sid || '~', undefined, { numeric: true }));
+  },
+
+  openZip() {
+    const shown = [...this.students.values()].filter(s => this.matches(s)).length;
+    $('zAllLabel').textContent = `${this.isAdmin ? '전체' : '내 담당 전체'} ${this.students.size}명`;
+    $('zShownLabel').textContent = `지금 목록에 보이는 학생 ${shown}명`;
+    $('zStages').innerHTML = STAGES.map(g => `<label class="agree small" style="margin:0"><input type="checkbox" value="${g.key}" checked> <span>${g.full}</span></label>`).join('');
+    $('zProg').hidden = true;
+    $('zGo').disabled = false;
+    const count = () => {
+      const o = this.zipOptions();
+      const n = this.zipPlan(o).files.length;
+      $('zCount').textContent = `파일 ${n}개`;
+    };
+    $('mZip').querySelectorAll('input').forEach(i => i.onchange = count);
+    count();
+    this.openModal('mZip');
+  },
+
+  zipOptions() {
+    const scope = (app.querySelector('input[name="zScope"]:checked') || {}).value || 'all';
+    const list = scope === 'shown' ? [...this.students.values()].filter(s => this.matches(s)) : [...this.students.values()];
+    return {
+      ids: list.map(s => s.id),
+      stages: [...$('zStages').querySelectorAll('input:checked')].map(i => i.value),
+      layout: (app.querySelector('input[name="zLayout"]:checked') || {}).value || 'student',
+      old: $('zOld').checked
+    };
+  },
+
+  zipPlan(o) {
+    const files = [];
+    const list = this.sortedStudents(o.ids.map(id => this.students.get(id)).filter(Boolean));
+    const order = Object.fromEntries(STAGES.map((g, i) => [g.key, i + 1]));
+    list.forEach(s => {
+      const who = safeName(`${s.sid || ''}_${s.name}`.replace(/^_/, ''));
+      stagesFor(s).filter(g => o.stages.includes(g.key)).forEach(g => {
+        const cur = s[g.key];
+        const stageLabel = `${order[g.key]}_${g.full.replace('최종보고서 ', '').replace(/^\d+\.\s*/, '')}`;
+        const dir = o.layout === 'stage' ? safeName(stageLabel) : who;
+        const base = o.layout === 'stage' ? who : safeName(stageLabel);
+        if (cur.file_path) files.push({ path: cur.file_path, name: `${dir}/${base}_${safeName(cur.file_name || 'file')}` });
+        if (o.old) {
+          s.ev[g.key].filter(e => e.kind === 'submit' && e.file_path && e.file_path !== cur.file_path)
+            .forEach(e => files.push({ path: e.file_path, name: `${dir}/이전 제출/${base}_${dateOf(e.created_at)}_${safeName(e.file_name || 'file')}` }));
+        }
+      });
+    });
+    return { list, files };
+  },
+
+  async runZip(opts) {
+    const o = opts || this.zipOptions();
+    const { list, files } = this.zipPlan(o);
+    if (!list.length) { toast('받을 학생이 없습니다.'); return; }
+    const single = o.ids.length === 1;
+    const go = $('zGo');
+    if (!single) { go.disabled = true; $('zProg').hidden = false; }
+    const prog = (i, n, msg) => {
+      if (single) { $('dMsg').textContent = msg; return; }
+      $('zBar').style.width = (n ? i / n * 100 : 100) + '%';
+      $('zMsg').textContent = msg;
+    };
+    try {
+      const Z = await loadZipLib();
+      const root = single ? safeName(`${list[0].sid || ''}_${list[0].name}_제출물_${todayStr()}`) : `개인연구_제출물_${todayStr()}`;
+      const entries = {};
+      const used = new Set();
+      const missing = [];
+      let done = 0;
+      const queue = [...files];
+      const worker = async () => {
+        while (queue.length) {
+          const f = queue.shift();
+          try {
+            const blob = await downloadBlob(f.path);
+            let name = `${root}/${f.name}`;
+            for (let k = 2; used.has(name); k++) name = `${root}/${f.name.replace(/(\.[^./]+)?$/, ` (${k})$1`)}`;
+            used.add(name);
+            entries[name] = [new Uint8Array(await blob.arrayBuffer()), { level: 0 }];
+          } catch (e) { missing.push(f.name); }
+          done++;
+          prog(done, files.length, `파일 받는 중 ${done} / ${files.length}`);
+        }
+      };
+      prog(0, files.length, files.length ? `파일 받는 중 0 / ${files.length}` : '파일 정리 중');
+      await Promise.all([worker(), worker(), worker()]);
+      entries[`${root}/명단_제출현황.csv`] = Z.strToU8(this.csvRoster(list));
+      entries[`${root}/피드백_기록.csv`] = Z.strToU8(this.csvFeedback(list));
+      if (missing.length) entries[`${root}/받지 못한 파일.txt`] = Z.strToU8('아래 파일은 받지 못했습니다 (삭제되었거나 권한이 없음).\r\n\r\n' + missing.join('\r\n'));
+      prog(files.length, files.length, '압축하는 중');
+      const zipped = Z.zipSync(entries);
+      saveBlob(new Blob([zipped], { type: 'application/zip' }), `${root}.zip`);
+      const mb = (zipped.length / 1048576).toFixed(1);
+      prog(files.length, files.length, `완료: 파일 ${files.length - missing.length}개, ${mb}MB${missing.length ? ` (받지 못한 파일 ${missing.length}개)` : ''}`);
+      toast(`zip 파일을 저장했습니다 (${mb}MB).`);
+    } catch (e) {
+      toast('내려받기를 준비하지 못했습니다. 잠시 후 다시 시도하세요.');
+      prog(0, 0, '');
+    } finally {
+      go.disabled = false;
+    }
+  },
+
+  exportCsv() {
+    const list = this.sortedStudents(this.students.values());
+    const blob = new Blob([this.csvRoster(list)], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `개인연구_제출현황_${todayStr()}.csv`;
