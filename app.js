@@ -9,6 +9,8 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
 
+/* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
+const APP_VERSION = '2026-11-08';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -124,7 +126,7 @@ function loadHwpLib() {
   if (!hwpLibPromise) {
     hwpLibPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'vendor/hwp-viewer.min.js';
+      s.src = 'vendor/hwp-viewer.min.js?v=' + APP_VERSION;
       s.onload = () => window.HWPjs ? resolve(window.HWPjs) : reject(new Error('viewer'));
       s.onerror = () => { hwpLibPromise = null; reject(new Error('viewer')); };
       document.head.appendChild(s);
@@ -138,7 +140,7 @@ function loadHwpxLib() {
   if (!hwpxLibPromise) {
     hwpxLibPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'vendor/hwpx-viewer.min.js';
+      s.src = 'vendor/hwpx-viewer.min.js?v=' + APP_VERSION;
       s.onload = () => window.HWPXjs ? resolve(window.HWPXjs) : reject(new Error('viewer'));
       s.onerror = () => { hwpxLibPromise = null; reject(new Error('viewer')); };
       document.head.appendChild(s);
@@ -152,7 +154,7 @@ function loadZipLib() {
   if (!zipLibPromise) {
     zipLibPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'vendor/zip.min.js';
+      s.src = 'vendor/zip.min.js?v=' + APP_VERSION;
       s.onload = () => window.ZIPjs ? resolve(window.ZIPjs) : reject(new Error('zip'));
       s.onerror = () => { zipLibPromise = null; reject(new Error('zip')); };
       document.head.appendChild(s);
