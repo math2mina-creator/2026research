@@ -429,3 +429,8 @@ img.sig{display:block;margin-top:6px;max-width:240px;width:100%;background:#fff;
 .ai-final{border-top:1px dashed var(--line);padding-top:12px;margin-top:6px}
 a.btn{text-decoration:none;color:inherit;display:inline-block}
 .rv-why{display:block;margin-top:6px;color:#7A849A;font-size:12px}
+/* simple text view for HWP that the viewer can't lay out */
+.hwp-host .hx-scroll{height:100%;overflow:auto;background:#e8eaed;padding:20px 12px;box-sizing:border-box}
+.hwp-host .hx-note{font:13px system-ui,sans-serif;color:#555;text-align:center;margin:0 0 12px}
+.hwp-host .hx-page.simple{background:#fff;color:#111;width:794px;margin:0 auto 20px;padding:60px 70px;box-sizing:border-box;box-shadow:0 1px 4px rgba(0,0,0,.18);font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
+.hwp-host .hx-p{margin:0}
