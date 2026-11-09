@@ -83,12 +83,12 @@ select.f{padding:9px 10px;border:1px solid var(--line);border-radius:8px;backgro
 
 /* table */
 .tablebox{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;min-width:760px}
-th{font-size:13px;font-weight:600;color:var(--ink-2);text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--surface)}
-td{padding:11px 14px;border-bottom:1px solid var(--line-2);vertical-align:middle}
-tbody tr{cursor:pointer}
-tbody tr:hover td{background:var(--paper)}
-tbody tr:last-child td{border-bottom:0}
+.tablebox table{width:100%;border-collapse:collapse;min-width:760px}
+.tablebox th{font-size:13px;font-weight:600;color:var(--ink-2);text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--surface)}
+.tablebox td{padding:11px 14px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+.tablebox tbody tr{cursor:pointer}
+.tablebox tbody tr:hover td{background:var(--paper)}
+.tablebox tbody tr:last-child td{border-bottom:0}
 .sid{font-variant-numeric:tabular-nums;color:var(--ink-2);font-size:14px}
 .nm{font-weight:600}
 .nomail{font-size:12px;color:var(--amber);margin-left:6px}
@@ -192,16 +192,16 @@ code.ex{display:block;white-space:pre;background:var(--paper);border:1px solid v
   .wrap{padding:16px 16px 56px}
   h1{font-size:25px}
   .cards{grid-template-columns:1fr}
-  table{min-width:0}
-  thead{display:none}
-  tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding:12px 14px;border-bottom:1px solid var(--line-2)}
-  tbody tr:last-child{border-bottom:0}
-  td{padding:0;border:0}
-  td.c-who{grid-column:1/-1;display:flex;gap:8px;align-items:baseline}
-  td.c-topic{grid-column:1/-1}
-  td.c-recent{display:none}
-  td.c-plan::before{content:"계획서";display:block;font-size:12px;color:var(--ink-3)}
-  td.c-report::before{content:"최종보고서";display:block;font-size:12px;color:var(--ink-3)}
+  .tablebox table{min-width:0}
+  .tablebox thead{display:none}
+  .tablebox tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding:12px 14px;border-bottom:1px solid var(--line-2)}
+  .tablebox tbody tr:last-child{border-bottom:0}
+  .tablebox td{padding:0;border:0}
+  .tablebox td.c-who{grid-column:1/-1;display:flex;gap:8px;align-items:baseline}
+  .tablebox td.c-topic{grid-column:1/-1}
+  .tablebox td.c-recent{display:none}
+  .tablebox td.c-plan::before{content:"계획서";display:block;font-size:12px;color:var(--ink-3)}
+  .tablebox td.c-report::before{content:"최종보고서";display:block;font-size:12px;color:var(--ink-3)}
   .topic{max-width:none;white-space:normal}
   .grid2,.row2{grid-template-columns:1fr}
 }
