@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-10g';
+const APP_VERSION = '2026-11-11';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -132,6 +132,8 @@ const STAGES = [
 ];
 const OUTPUT = STAGES.find(g => g.key === 'output');
 const PLAN = STAGES.find(g => g.key === 'plan');
+/* 메일 알림용 앱스 스크립트 코드 (비밀값은 설정 창에서 채움) */
+const APPS_SCRIPT_CODE = "/**\n * 개인연구 사이트 · 학생 메일 알림\n * - 사이트(Supabase)가 보낸 신호를 받아 학생 학교 메일로 알림을 보냅니다.\n * - 메일에는 피드백 내용을 넣지 않고, 사이트에서 확인하라는 알림과 링크만 보냅니다.\n * - 같은 학생의 같은 항목은 10분 안에 한 번만 보냅니다.\n */\nconst SECRET = '__SECRET__';   // 사이트의 '메일 알림' 설정 창에 보이는 비밀값과 같아야 합니다.\n\nfunction doPost(e) {\n  try {\n    const d = JSON.parse(e.postData.contents || '{}');\n    if (d.secret !== SECRET) return out_({ ok: false, error: 'secret' });\n    if (!d.to || d.to.indexOf('@') < 0) return out_({ ok: false, error: 'no email' });\n\n    const cache = CacheService.getScriptCache();\n    const key = 'n:' + d.to + ':' + (d.stage || '');\n    if (!d.test && cache.get(key)) return out_({ ok: true, skipped: 'recent' });\n    cache.put(key, '1', 600);\n\n    const what = d.kind === 'memo' ? '내 글에 본문 메모를 남겼어요'\n      : d.status === 'revise' ? '보완 요청을 보냈어요'\n      : d.status === 'done' ? '확인을 마쳤어요'\n      : d.kind === 'test' ? '테스트 메일이에요'\n      : '피드백을 남겼어요';\n    const teacher = (d.teacher || '담당') + ' 선생님';\n    const subject = '[개인연구] ' + (d.stageLabel || '') + ' · ' + teacher + '이 ' + what;\n    const site = d.site || '';\n    const html =\n      '<div style=\"font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;font-size:15px;line-height:1.7;color:#17213A\">' +\n      '<p>' + esc_(d.name || '') + ' 학생, 안녕하세요.</p>' +\n      '<p><b>' + esc_(d.stageLabel || '') + '</b>에 ' + esc_(teacher) + '이 ' + esc_(what) + '</p>' +\n      '<p>내용은 개인연구 사이트에서 확인하세요.</p>' +\n      (site ? '<p><a href=\"' + esc_(site) + '\" style=\"display:inline-block;padding:10px 18px;background:#17213A;color:#fff;border-radius:8px;text-decoration:none\">사이트에서 확인하기</a></p>' : '') +\n      '<p style=\"color:#7A849A;font-size:12px\">이 메일은 자동으로 보내졌어요. 답장하지 말고 사이트에서 확인해 주세요.</p></div>';\n\n    MailApp.sendEmail({ to: d.to, subject: subject, htmlBody: html, name: '개인연구 알림' });\n    return out_({ ok: true });\n  } catch (err) {\n    return out_({ ok: false, error: String(err) });\n  }\n}\n\n/* 처음 한 번 실행해서 '메일 보내기' 권한을 허용하세요. */\nfunction authorize() {\n  Logger.log('오늘 보낼 수 있는 메일 수: ' + MailApp.getRemainingDailyQuota());\n}\n\nfunction out_(o) {\n  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);\n}\nfunction esc_(s) {\n  return String(s).replace(/[&<>\"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]; });\n}\n";
 /* 양식을 보여 줄 위치 */
 const TPL_PLACES = [
   ['all', '모든 학생 공통 (학생 화면 맨 위)'], ['plan', '연구계획서'], ['report', '최종보고서'],
@@ -705,6 +707,26 @@ const Teacher = {
       <div class="mfoot"><span class="msg" id="zCount"></span><button class="btn" data-close="mZip">닫기</button><button class="btn primary" id="zGo">내려받기</button></div>
     </div></div>
 
+    <div class="modal" id="mNotify" role="dialog" aria-modal="true" aria-labelledby="mNotifyT"><div class="mbox wide">
+      <h2 id="mNotifyT">학생 메일 알림</h2>
+      <p>선생님이 피드백, 보완 요청, 확인 완료, 본문 메모를 저장하면 학생 학교 메일로 “새 피드백이 있어요”와 사이트 링크가 자동으로 갑니다. 피드백 내용은 메일에 넣지 않고, 같은 학생의 같은 항목은 10분에 한 번만 보냅니다.</p>
+      <p class="notice" id="nfMissing" hidden>이 기능을 쓰려면 Supabase에서 update-notify.sql 을 먼저 실행하세요.</p>
+      <ol class="nf-steps">
+        <li><b>앱스 스크립트 만들기</b> · 학교 구글 계정으로 <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener noreferrer">새 앱스 스크립트 프로젝트 ↗</a>를 열고, 원래 있던 코드를 지운 뒤 아래 코드를 붙여넣고 저장하세요.
+          <div class="tpl-pick" style="margin-top:8px"><button class="btn sm primary" id="nfCopy">코드 복사 (비밀값 포함)</button><span class="hint" id="nfSecretHint"></span></div></li>
+        <li><b>권한 허용</b> · 편집기 위쪽 함수 목록에서 <code>authorize</code>를 고르고 <b>실행</b>을 눌러 메일 보내기 권한을 허용하세요.</li>
+        <li><b>웹 앱으로 배포</b> · <b>배포 → 새 배포 → 유형: 웹 앱</b>, 실행 사용자: <b>나</b>, 액세스 권한: <b>모든 사용자</b>로 배포하고 나온 <b>웹 앱 URL</b>을 아래에 붙여넣으세요.</li>
+      </ol>
+      <div class="field"><label class="l" for="nfUrl">웹 앱 URL</label><input class="in" id="nfUrl" placeholder="https://script.google.com/macros/s/…/exec"></div>
+      <div class="field"><label class="l" for="nfSite">메일에 넣을 사이트 주소</label><input class="in" id="nfSite"></div>
+      <label class="agree small"><input type="checkbox" id="nfOn"> <span>메일 알림 켜기</span></label>
+      <div class="tpl-pick"><button class="btn primary" id="nfSave">설정 저장</button><span class="hint" id="nfMsg"></span></div>
+      <h3 class="rv-h" style="margin-top:16px">테스트</h3>
+      <div class="tpl-pick"><input class="in" id="nfTo" type="email" style="flex:1;min-width:200px"><button class="btn" id="nfTest">테스트 메일 보내기</button></div>
+      <p class="hint" id="nfTestMsg"></p>
+      <div class="mfoot"><button class="btn" data-close="mNotify">닫기</button></div>
+    </div></div>
+
     <div class="modal" id="mAnn" role="dialog" aria-modal="true" aria-labelledby="mAnnT"><div class="mbox wide">
       <h2 id="mAnnT">공지사항</h2>
       <p id="annIntro"></p>
@@ -757,6 +779,9 @@ const Teacher = {
     $('teachAdd').onclick = () => this.addTeacher();
     $('bAssign').onclick = () => this.openAssign();
     $('bAnn').onclick = () => this.openAnn();
+    $('nfCopy').onclick = () => this.copyText(APPS_SCRIPT_CODE.replace('__SECRET__', this.nf.secret), '앱스 스크립트 코드를 복사했습니다. 새 프로젝트에 붙여넣으세요.');
+    $('nfSave').onclick = () => this.saveNotify();
+    $('nfTest').onclick = () => this.testNotify();
     $('annGo').onclick = () => this.saveAnn();
     $('annCancel').onclick = () => this.resetAnnForm();
     $('bBulk').addEventListener('click', () => {
@@ -835,10 +860,11 @@ const Teacher = {
       : `고등학교 1학년 개인연구 프로그램 · <b>${esc(this.tName(this.email))}</b> 선생님 담당 학생 ${this.students.size}명`;
     $('dues').innerHTML = DUES.filter(g => !g.extra || anyExtra).map(g => { const v = dueFrom(c, g.key); return v
       ? `<span>${g.label} <b>${fmtDate(v)}</b>${ddayTag(v)}</span>`
-      : `<span>${g.label} <b>미정</b></span>`; }).join('') + (this.isAdmin ? '<button class="linkbtn" id="bSet">마감일 설정</button><button class="linkbtn" id="bTeachers">선생님 계정</button>' : '');
+      : `<span>${g.label} <b>미정</b></span>`; }).join('') + (this.isAdmin ? '<button class="linkbtn" id="bSet">마감일 설정</button><button class="linkbtn" id="bTeachers">선생님 계정</button><button class="linkbtn" id="bNotify">메일 알림</button>' : '');
     if (this.isAdmin) {
       $('bSet').onclick = () => this.openSettings();
       $('bTeachers').onclick = () => this.openTeachers();
+      $('bNotify').onclick = () => this.openNotify();
     }
     app.querySelectorAll('.admin-only').forEach(b => b.hidden = !this.isAdmin);
     $('bAdd').hidden = false;
@@ -1910,6 +1936,55 @@ const Teacher = {
       if (this.ai && this.ai.sid === id) { this.ai.busy = false; setMsg(''); const b = $('aiGo'); if (b) b.disabled = false; }
       toast(e.message || '요약 자료를 만들지 못했습니다.');
     }
+  },
+
+  /* ----- 메일 알림 ----- */
+  nf: null,
+  async openNotify() {
+    this.openModal('mNotify');
+    $('nfMsg').textContent = ''; $('nfTestMsg').textContent = '';
+    const { data, error } = await sb.from('notify_settings').select('*').eq('id', 1).maybeSingle();
+    $('nfMissing').hidden = !error;
+    const row = data || {};
+    let secret = row.secret;
+    if (!secret) { const a = new Uint8Array(18); crypto.getRandomValues(a); secret = Array.from(a, b => b.toString(16).padStart(2, '0')).join(''); }
+    this.nf = { secret, saved: !!row.secret };
+    $('nfSecretHint').textContent = `비밀값 ${secret.slice(0, 6)}… 이 코드에 들어 있어요${row.secret ? '' : ' (설정 저장 때 함께 저장됩니다)'}`;
+    $('nfUrl').value = row.webhook_url || '';
+    $('nfSite').value = row.site_url || (/^https?:/.test(location.origin) ? location.origin + location.pathname : '');
+    $('nfOn').checked = !!row.enabled;
+    $('nfTo').value = this.email;
+  },
+  async saveNotify() {
+    const url = $('nfUrl').value.trim();
+    if (url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) { toast('웹 앱 URL은 https://script.google.com/macros/s/…/exec 형식이어야 합니다.'); $('nfUrl').focus(); return; }
+    const row = { webhook_url: url, site_url: $('nfSite').value.trim(), enabled: $('nfOn').checked && !!url, secret: this.nf.secret, updated_at: new Date().toISOString() };
+    const { error } = await sb.from('notify_settings').update(row).eq('id', 1);
+    if (error) { toast(dbMsg(error)); return; }
+    this.nf.saved = true;
+    $('nfOn').checked = row.enabled;
+    $('nfMsg').textContent = row.enabled ? '저장했습니다. 이제 피드백을 저장하면 학생에게 메일이 갑니다.' : '저장했습니다. 메일 알림은 꺼져 있어요.';
+    toast('메일 알림 설정을 저장했습니다.');
+  },
+  async testNotify() {
+    const to = $('nfTo').value.trim();
+    if (!/@/.test(to)) { toast('받을 이메일을 입력하세요.'); return; }
+    if (!this.nf.saved) { toast('먼저 설정 저장을 눌러 주세요.'); return; }
+    const msg = $('nfTestMsg');
+    msg.textContent = '보내는 중입니다.';
+    const { data: id, error } = await sb.rpc('test_notify', { p_to: to });
+    if (error) { msg.textContent = error.message || '테스트를 보내지 못했습니다.'; return; }
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      const { data: r } = await sb.rpc('notify_result', { p_id: id });
+      if (r && !r.pending) {
+        if (r.error) { msg.textContent = `연결 실패: ${r.error}`; return; }
+        if (r.status_code === 200 || r.status_code === 302) { msg.textContent = `앱스 스크립트에 전달했어요. ${to} 메일함을 확인하세요. (1분 안에 안 오면 스팸함과 2~3단계 설정을 확인하세요)`; return; }
+        msg.textContent = `앱스 스크립트가 응답하지 않았어요 (코드 ${r.status_code}). 웹 앱 URL과 '모든 사용자' 액세스 설정을 확인하세요.`;
+        return;
+      }
+    }
+    msg.textContent = '응답이 늦어요. 잠시 뒤 메일함을 확인해 보세요.';
   },
 
   /* ----- 공지사항 ----- */

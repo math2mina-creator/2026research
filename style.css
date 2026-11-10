@@ -483,3 +483,6 @@ mark.memo-hl.on{background:#ffcf33;box-shadow:0 0 0 3px rgba(240,180,0,.35)}
 .ts-bar i{display:block;height:100%;background:var(--blue)}
 .ts-wait{color:var(--blue);font-weight:600}
 .ts-late{color:var(--stamp);font-weight:600}
+.nf-steps{margin:8px 0 14px;padding-left:20px;font-size:14px;color:var(--ink-2)}
+.nf-steps li{margin:8px 0}
+.nf-steps code{background:var(--paper);border:1px solid var(--line-2);border-radius:4px;padding:0 5px;font-size:13px}
