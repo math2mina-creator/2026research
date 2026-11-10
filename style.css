@@ -434,3 +434,29 @@ a.btn{text-decoration:none;color:inherit;display:inline-block}
 .hwp-host .hx-note{font:13px system-ui,sans-serif;color:#555;text-align:center;margin:0 0 12px}
 .hwp-host .hx-page.simple{background:#fff;color:#111;width:794px;margin:0 auto 20px;padding:60px 70px;box-sizing:border-box;box-shadow:0 1px 4px rgba(0,0,0,.18);font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
 .hwp-host .hx-p{margin:0}
+
+/* document memos */
+mark.memo-hl{background:#ffe58a;color:inherit;border-bottom:2px solid #f0b400;cursor:pointer;padding:0 1px;border-radius:2px}
+mark.memo-hl.on{background:#ffcf33;box-shadow:0 0 0 3px rgba(240,180,0,.35)}
+.memo-ui{position:fixed;z-index:60}
+.memo-form{width:320px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:10px}
+.memo-q{font-size:13px;color:var(--ink-2);background:#fff6d1;border-left:3px solid #f0b400;padding:4px 8px;margin-bottom:8px;border-radius:0 6px 6px 0;color:#5b4a00}
+.memo-btns{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
+.memo-h{margin-top:14px}
+.memo-list{list-style:none;margin:6px 0 10px;padding:0;display:flex;flex-direction:column;gap:8px}
+.memo-list li{border:1px solid var(--line-2);border-left:3px solid #f0b400;border-radius:0 8px 8px 0;padding:8px 10px;background:var(--surface)}
+.memo-list li.flash{box-shadow:0 0 0 3px #ffe58a}
+.memo-list li.lost{border-left-color:var(--line)}
+.memo-list.old li{opacity:.75}
+.memo-quote{display:block;background:none;border:0;padding:0;text-align:left;font-size:13px;color:#7a5c00;cursor:pointer;font-style:italic;font-family:inherit}
+.memo-quote.static{cursor:auto}
+.memo-quote:hover{text-decoration:underline}
+.memo-quote.static:hover{text-decoration:none}
+.memo-note{white-space:pre-wrap;font-size:14.5px;margin:4px 0 2px}
+.memo-box{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.memo-box h3{font-size:14px;margin:0 0 4px;color:var(--ink-2)}
+.memo-box h3 .hint{font-weight:400;margin-left:6px}
+@media (prefers-color-scheme: dark){ .memo-q{background:#3a3214;color:#f3d77a} .memo-quote{color:#f3d77a} mark.memo-hl{color:#111} }
+.memo-list .hmeta{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-3);flex-wrap:wrap}
+.memo-list .del{margin-left:auto;background:none;border:0;color:var(--ink-3);cursor:pointer;font-size:12.5px;padding:2px 4px}
+.memo-list .del:hover{color:var(--stamp)}

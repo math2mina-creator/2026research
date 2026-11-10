@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-10d';
+const APP_VERSION = '2026-11-10e';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -547,6 +547,9 @@ const Teacher = {
     const [st, sub, ev, notes, set, tpls] = res.map(r => r.data);
     this.settings = set || {};
     this.templates = tpls || [];
+    const mm = await sb.from('doc_memos').select('*').order('created_at', { ascending: true });
+    this.memoOK = !mm.error;
+    this.memos = mm.error ? [] : (mm.data || []);
     const m = new Map();
     for (const s of st) m.set(s.id, { ...s, field: s.field || '', topic: s.topic || '', email: s.email || '', sid: s.sid || '', cls: s.cls || '', memo: '', ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() });
     for (const n of notes) if (m.has(n.student_id)) m.get(n.student_id).memo = n.memo || '';
@@ -787,6 +790,16 @@ const Teacher = {
     app.querySelectorAll('[data-close]').forEach(b => b.onclick = () => this.closeModal(b.dataset.close));
     app.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) this.closeModal(m.id); }));
     $('rvClose').onclick = () => this.closeReview();
+    const rvView = $('rvView');
+    const onSel = () => setTimeout(() => this.memoSelection(), 10);
+    rvView.addEventListener('mouseup', onSel);
+    rvView.addEventListener('keyup', onSel);
+    rvView.addEventListener('touchend', onSel);
+    rvView.addEventListener('scroll', () => this.hideMemoUI(true), true);
+    rvView.addEventListener('click', e => {
+      const m = e.target.closest && e.target.closest('mark.memo-hl');
+      if (m) this.focusMemo(m.dataset.memo, 'side');
+    });
     $('rvPrev').onclick = () => this.reviewGo(-1);
     $('rvNext').onclick = () => this.reviewGo(1);
     $('rvDl').onclick = async () => {
@@ -1247,6 +1260,7 @@ const Teacher = {
     if (!this.rv) return;
     if (!force && !this.confirmLeave('저장하지 않은 피드백이 있습니다. 한 번 더 누르면 버리고 닫습니다.')) return;
     if (this.rv.cleanup) this.rv.cleanup();
+    this.hideMemoUI();
     $('rvView').innerHTML = '';
     $('review').classList.remove('on');
     $('review').setAttribute('aria-hidden', 'true');
@@ -1291,6 +1305,8 @@ const Teacher = {
     rv.cleanup = cleanup;
     rv.zoom = 1;
     requestAnimationFrame(() => requestAnimationFrame(() => this.zoom(0)));
+    this.applyMemos();
+    if (this.memosFor(it.s.id, it.stage).length) this.renderReviewSide();
     if (!this.rvResize && window.ResizeObserver) {
       let t = null;
       this.rvResize = new ResizeObserver(() => {
@@ -1299,6 +1315,197 @@ const Teacher = {
       });
       this.rvResize.observe($('rvView'));
     }
+  },
+
+  /* ===== 본문 메모 ===== */
+  memos: [], memoOK: true,
+
+  memosFor(sid, stage) { return this.memos.filter(m => m.student_id === sid && m.stage === stage); },
+
+  /* 문서 글자 목록: 글자 위치로 문장을 찾고 표시하는 데 씁니다 */
+  docRoot() {
+    const v = $('rvView');
+    return v.querySelector('.hx-scroll') || v.querySelector('.hwp-host') || null;
+  },
+  textIndex(root) {
+    const nodes = [];
+    let full = '';
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => {
+        const p = n.parentElement;
+        if (!p || p.closest('style,script,.hx-note,.memo-ui')) return NodeFilter.FILTER_REJECT;
+        return n.nodeValue ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      }
+    });
+    for (let n = w.nextNode(); n; n = w.nextNode()) { nodes.push({ node: n, start: full.length, end: full.length + n.nodeValue.length }); full += n.nodeValue; }
+    return { nodes, full };
+  },
+  offsetOf(idx, node, offset) {
+    if (node.nodeType === 3) { const e = idx.nodes.find(x => x.node === node); return e ? e.start + offset : -1; }
+    /* 요소 안의 위치: 그 앞까지의 글자 수 */
+    const child = node.childNodes[offset] || null;
+    for (const e of idx.nodes) {
+      if (child ? (child === e.node || child.contains(e.node) || (child.compareDocumentPosition(e.node) & Node.DOCUMENT_POSITION_FOLLOWING)) : false) return e.start;
+    }
+    return idx.full.length;
+  },
+
+  memoSelection() {
+    if (!this.rv) return;
+    const root = this.docRoot();
+    const sel = window.getSelection();
+    if (!root || !sel || sel.isCollapsed || !sel.rangeCount) { this.hideMemoUI(); return; }
+    const range = sel.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) { this.hideMemoUI(); return; }
+    const text = sel.toString().replace(/\s+/g, ' ').trim();
+    if (text.length < 2) { this.hideMemoUI(); return; }
+    const idx = this.textIndex(root);
+    const a = this.offsetOf(idx, range.startContainer, range.startOffset);
+    const b = this.offsetOf(idx, range.endContainer, range.endOffset);
+    if (a < 0 || b <= a) { this.hideMemoUI(); return; }
+    const quote = idx.full.slice(a, b);
+    this.pendingMemo = { quote: quote.slice(0, 1000), prefix: idx.full.slice(Math.max(0, a - 40), a), suffix: idx.full.slice(b, b + 40) };
+    const r = range.getBoundingClientRect();
+    this.showMemoButton(r);
+  },
+
+  memoHost() {
+    let ui = document.getElementById('memoUI');
+    if (!ui) { ui = document.createElement('div'); ui.id = 'memoUI'; ui.className = 'memo-ui'; document.body.appendChild(ui); }
+    return ui;
+  },
+  hideMemoUI(onlyButton) {
+    const ui = document.getElementById('memoUI');
+    if (!ui) return;
+    if (onlyButton && ui.dataset.mode === 'form') return;
+    ui.hidden = true; ui.dataset.mode = '';
+  },
+  placeUI(ui, rect) {
+    const top = Math.min(window.innerHeight - 20, rect.bottom + 8), left = Math.min(window.innerWidth - 330, Math.max(8, rect.left));
+    ui.style.top = top + 'px'; ui.style.left = left + 'px';
+  },
+  showMemoButton(rect) {
+    const ui = this.memoHost();
+    ui.dataset.mode = 'button';
+    ui.innerHTML = '<button class="btn sm primary" id="memoAdd">💬 메모 달기</button>';
+    ui.hidden = false;
+    this.placeUI(ui, rect);
+    $('memoAdd').onmousedown = e => e.preventDefault();
+    $('memoAdd').onclick = () => this.showMemoForm(rect);
+  },
+  showMemoForm(rect) {
+    const ui = this.memoHost();
+    const q = this.pendingMemo.quote;
+    ui.dataset.mode = 'form';
+    ui.innerHTML = `<div class="memo-form">
+      <div class="memo-q">“${esc(q.length > 80 ? q.slice(0, 80) + '…' : q)}”</div>
+      <textarea class="in" id="memoText" rows="3" maxlength="3000" placeholder="이 부분에 대한 메모를 쓰세요. 학생에게 보입니다."></textarea>
+      <div class="memo-btns"><button class="btn sm" id="memoCancel">취소</button><button class="btn sm primary" id="memoSave">메모 저장</button></div>
+    </div>`;
+    ui.hidden = false;
+    this.placeUI(ui, rect);
+    const ta = $('memoText');
+    ta.focus();
+    $('memoCancel').onclick = () => { this.hideMemoUI(); window.getSelection().removeAllRanges(); };
+    $('memoSave').onclick = () => this.saveMemo();
+    ta.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this.saveMemo(); if (e.key === 'Escape') { e.stopPropagation(); this.hideMemoUI(); } };
+  },
+  async saveMemo() {
+    const it = this.rvItem();
+    const note = ($('memoText').value || '').trim();
+    if (!note) { toast('메모 내용을 쓰세요.'); return; }
+    if (!this.memoOK) { toast('본문 메모를 쓰려면 Supabase에서 update-memos.sql 을 먼저 실행하세요.'); return; }
+    $('memoSave').disabled = true;
+    const row = { student_id: it.s.id, stage: it.stage, file_path: it.path, ...this.pendingMemo, note, author_email: this.email, author_name: this.tName(this.email) };
+    const { data, error } = await sb.from('doc_memos').insert(row).select().single();
+    if (error) { toast(dbMsg(error)); $('memoSave').disabled = false; return; }
+    this.memos.push(data || { ...row, id: 'tmp' + Date.now(), created_at: new Date().toISOString() });
+    this.hideMemoUI();
+    window.getSelection().removeAllRanges();
+    this.applyMemos();
+    this.renderReviewSide();
+    toast('메모를 달았습니다. 학생 화면에도 보입니다.');
+  },
+  async deleteMemo(id) {
+    const { error } = await sb.from('doc_memos').delete().eq('id', id);
+    if (error) { toast(dbMsg(error)); return; }
+    this.memos = this.memos.filter(m => m.id !== id);
+    this.applyMemos();
+    this.renderReviewSide();
+  },
+
+  /* 저장된 메모를 문서에서 찾아 노란색으로 표시합니다 */
+  applyMemos() {
+    const it = this.rvItem();
+    const root = this.docRoot();
+    if (!it || !root) return;
+    root.querySelectorAll('mark.memo-hl').forEach(m => { const p = m.parentNode; while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); p.normalize(); });
+    const list = this.memosFor(it.s.id, it.stage);
+    if (!list.length) return;
+    const idx = this.textIndex(root);
+    const spans = [];
+    list.forEach(m => {
+      if (!m.quote) return;
+      let best = -1, bestScore = -1;
+      for (let at = idx.full.indexOf(m.quote); at >= 0; at = idx.full.indexOf(m.quote, at + 1)) {
+        const pre = idx.full.slice(Math.max(0, at - m.prefix.length), at), suf = idx.full.slice(at + m.quote.length, at + m.quote.length + m.suffix.length);
+        let sc = 0;
+        for (let k = 1; k <= Math.min(pre.length, m.prefix.length) && pre[pre.length - k] === m.prefix[m.prefix.length - k]; k++) sc++;
+        for (let k = 0; k < Math.min(suf.length, m.suffix.length) && suf[k] === m.suffix[k]; k++) sc++;
+        if (sc > bestScore) { bestScore = sc; best = at; }
+      }
+      m._found = best >= 0;
+      if (best >= 0 && !spans.some(x => best < x.b && best + m.quote.length > x.a)) spans.push({ a: best, b: best + m.quote.length, id: m.id });
+    });
+    /* 뒤에서부터 감싸야 앞쪽 위치가 바뀌지 않습니다 */
+    const segs = [];
+    spans.forEach(sp => idx.nodes.forEach(e => {
+      const a = Math.max(sp.a, e.start), b = Math.min(sp.b, e.end);
+      if (a < b && e.node.nodeValue.slice(a - e.start, b - e.start).trim()) segs.push({ node: e.node, a: a - e.start, b: b - e.start, id: sp.id, abs: a });
+    }));
+    segs.sort((x, y) => y.abs - x.abs).forEach(sg => {
+      let n = sg.node;
+      if (sg.b < n.nodeValue.length) n.splitText(sg.b);
+      if (sg.a > 0) n = n.splitText(sg.a);
+      const mk = document.createElement('mark');
+      mk.className = 'memo-hl';
+      mk.dataset.memo = sg.id;
+      n.parentNode.insertBefore(mk, n);
+      mk.appendChild(n);
+    });
+  },
+
+  focusMemo(id, where) {
+    if (where === 'side') {
+      const li = document.querySelector(`#rvSide [data-memoli="${CSS.escape(id)}"]`);
+      if (li) { li.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); li.classList.add('flash'); setTimeout(() => li.classList.remove('flash'), 1200); }
+    } else {
+      const mk = document.querySelector(`#rvView mark.memo-hl[data-memo="${CSS.escape(id)}"]`);
+      if (mk) { mk.scrollIntoView({ behavior: 'smooth', block: 'center' }); document.querySelectorAll('#rvView mark.memo-hl[data-memo="' + CSS.escape(id) + '"]').forEach(x => { x.classList.add('on'); setTimeout(() => x.classList.remove('on'), 1400); }); }
+      else toast('지금 파일에서 이 문장을 찾지 못했어요. 학생이 수정본을 냈을 수 있어요.');
+    }
+  },
+
+  memoSideHTML(it) {
+    const list = this.memosFor(it.s.id, it.stage);
+    const cur = list.filter(m => !m.file_path || m.file_path === it.path), old = list.filter(m => m.file_path && m.file_path !== it.path);
+    const li = m => `<li data-memoli="${esc(m.id)}" class="memo-li${m._found === false ? ' lost' : ''}">
+      <button class="memo-quote" data-memogo="${esc(m.id)}">“${esc(m.quote.length > 70 ? m.quote.slice(0, 70) + '…' : m.quote)}”</button>
+      <div class="memo-note">${esc(m.note)}</div>
+      <div class="hmeta"><span>${fmtDT(m.created_at)}</span>${m.author_email && m.author_email !== this.email ? `<span>${esc(m.author_name || '')}</span>` : ''}${m.seen_at ? '<span class="seen">학생 읽음</span>' : '<span class="unseen">학생 안 읽음</span>'}
+        <button class="del" data-memodel="${esc(m.id)}">삭제</button></div></li>`;
+    return `<h3 class="rv-h memo-h">본문 메모 ${list.length ? list.length + '개' : ''}</h3>
+      <p class="hint">${it.path && ['hwp', 'hwpx'].includes(extOf(it.name)) || this.docRoot() ? '왼쪽 문서에서 글을 드래그하면 그 부분에 메모를 달 수 있어요.' : 'PDF와 사진은 글을 선택할 수 없어요. 위 피드백 칸을 써 주세요.'}</p>
+      ${cur.length ? `<ul class="memo-list">${cur.map(li).join('')}</ul>` : ''}
+      ${old.length ? `<p class="hint">이전 제출본에 단 메모</p><ul class="memo-list old">${old.map(li).join('')}</ul>` : ''}`;
+  },
+  bindMemoSide() {
+    const side = $('rvSide');
+    side.querySelectorAll('[data-memogo]').forEach(b => b.onclick = () => this.focusMemo(b.dataset.memogo, 'doc'));
+    side.querySelectorAll('[data-memodel]').forEach(b => b.onclick = () => {
+      if (b.dataset.armed) this.deleteMemo(b.dataset.memodel);
+      else { b.dataset.armed = '1'; b.textContent = '한 번 더 눌러 삭제'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = '삭제'; } }, 3000); }
+    });
   },
 
   zoom(step) {
@@ -1348,8 +1555,10 @@ const Teacher = {
         <button class="btn" id="rvSave">저장</button>
         <button class="btn primary" id="rvSaveGo">${last ? '저장하고 닫기' : '저장하고 다음'}</button>
       </div>
+      ${this.memoSideHTML(it)}
       ${hist ? `<h3 class="rv-h">이 단계에서 보낸 피드백</h3><ul class="hist">${hist}</ul>` : ''}`;
     const side = $('rvSide');
+    this.bindMemoSide(it);
     side.querySelectorAll('input[name="rv-st"]').forEach(r => r.onchange = () => {
       rv.status = r.value;
       rv.dirty = true;
@@ -1923,6 +2132,10 @@ const Teacher = {
       s.sid, s.name, g.full, fmtDT(e.created_at), kind[e.kind] || e.kind, e.status ? ST[e.status].label : '',
       e.kind === 'submit' ? (e.file_name || '') : (e.note || ''), e.kind === 'feedback' ? (e.seen_at ? fmtDT(e.seen_at) : '안 읽음') : ''
     ].map(q).join(',')))));
+    (this.memos || []).filter(m => list.some(s => s.id === m.student_id)).forEach(m => {
+      const s = list.find(x => x.id === m.student_id), g = STAGES.find(x => x.key === m.stage);
+      rows.push([s.sid, s.name, g ? g.full : m.stage, fmtDT(m.created_at), '본문 메모', '', `“${m.quote}” → ${m.note}`, m.seen_at ? fmtDT(m.seen_at) : '안 읽음'].map(q).join(','));
+    });
     return '\uFEFF' + rows.join('\r\n');
   },
 
@@ -2203,6 +2416,8 @@ const Student = {
     if (bad) throw bad.error;
     const [me, subs, events, set, tpls] = res.map(r => r.data);
     this.templates = tpls || [];
+    const mm = await sb.from('doc_memos').select('*').eq('student_id', this.me.id).order('created_at', { ascending: true });
+    this.memos = mm.error ? [] : (mm.data || []);
     const an = await sb.from('announcements').select('*').order('created_at', { ascending: false });
     this.anns = an.error ? [] : (an.data || []);
     const tn = await sb.rpc('my_teacher_name');
@@ -2213,6 +2428,7 @@ const Student = {
     this.events = events;
     this.settings = set || {};
     this.unseen = new Set(events.filter(e => e.kind === 'feedback' && !e.seen_at).map(e => e.id));
+    (this.memos || []).filter(m => !m.seen_at).forEach(m => this.unseen.add(m.id));
   },
 
   markSeen() {
@@ -2244,7 +2460,7 @@ const Student = {
       const k = sub.status || 'none';
       const due = dueFrom(this.settings, g.due);
       const dd = dday(due);
-      const unread = this.events.filter(e => e.stage === g.key && this.unseen.has(e.id)).length;
+      const unread = this.events.filter(e => e.stage === g.key && this.unseen.has(e.id)).length + (this.memos || []).filter(m => m.stage === g.key && this.unseen.has(m.id)).length;
       return { g, k, due, dd, unread };
     });
     const done = rows.filter(r => r.k === 'done').length;
@@ -2354,6 +2570,16 @@ const Student = {
           <input type="file" accept="${acceptFor(g)}" data-file="${g.key}">
           <p>${g.key === 'output' ? '사진, PDF, 한글, 발표자료(PPT), 영상(mp4) 모두 올릴 수 있어요. 여러 파일은 zip으로 묶어 주세요.' : '한글(.hwp, .hwpx) 또는 PDF로 내면 선생님이 화면에서 바로 읽고 피드백을 줄 수 있어요.'} 최대 ${MAX_MB}MB, 파일을 여기로 끌어다 놓아도 됩니다.</p>
         </div>` : ''}
+      ${(() => {
+        const ms = (this.memos || []).filter(m => m.stage === g.key);
+        if (!ms.length) return '';
+        const cur = ms.filter(m => !m.file_path || m.file_path === sub.file_path), old = ms.filter(m => m.file_path && m.file_path !== sub.file_path);
+        const li = m => `<li><div class="memo-quote static">“${esc(m.quote)}”</div><div class="memo-note">${esc(m.note)}</div>
+          <div class="hmeta"><span>${fmtDT(m.created_at)}</span>${m.author_name ? `<span>${esc(m.author_name)} 선생님</span>` : ''}${this.unseen.has(m.id) ? '<span class="newb">새 메모</span>' : ''}</div></li>`;
+        return `<div class="memo-box"><h3>본문 메모 ${ms.length}개 <span class="hint">선생님이 내 글의 특정 부분에 남긴 메모예요</span></h3>
+          ${cur.length ? `<ul class="memo-list">${cur.map(li).join('')}</ul>` : ''}
+          ${old.length ? `<p class="hint">이전에 낸 파일에 달린 메모</p><ul class="memo-list old">${old.map(li).join('')}</ul>` : ''}</div>`;
+      })()}
       ${timeline ? `<ul class="hist">${timeline}</ul>` : ''}
     </section>`;
   },
