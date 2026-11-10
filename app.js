@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-10f';
+const APP_VERSION = '2026-11-10g';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -571,6 +571,7 @@ const Teacher = {
       <div class="dues" id="dues"></div>
     </header>
     <section class="summary" id="summary" aria-label="제출 현황"></section>
+    <details class="tstats" id="tstats" open hidden><summary>선생님별 제출 현황</summary><div class="tstats-box" id="tstatsBox"></div></details>
     <div class="tools">
       <input class="search" id="q" type="search" placeholder="이름, 학번, 연구 주제로 찾기" aria-label="검색">
       <select class="f" id="fcls" aria-label="반"></select>
@@ -768,7 +769,7 @@ const Teacher = {
       $('asMsg').textContent = `${$('asList').querySelectorAll('input:checked').length}명 선택`;
     };
     $('asGo').onclick = () => this.saveAssign();
-    $('fteacher').addEventListener('input', () => this.renderRows());
+    $('fteacher').addEventListener('input', () => { this.renderSummary(); this.renderRows(); });
     $('teachEmail').onkeydown = e => { if (e.key === 'Enter') this.addTeacher(); };
     $('bCsv').onclick = () => this.exportCsv();
     $('bZip').onclick = () => this.openZip();
@@ -848,11 +849,34 @@ const Teacher = {
       ft.innerHTML = '<option value="">전체 담당 교사</option><option value="__none">미배정</option>' +
         this.teachers.map(t => `<option value="${esc(t.email)}">${esc(this.tName(t.email))} 선생님</option>`).join('');
       ft.value = [...ft.options].some(o => o.value === cur) ? cur : '';
+      /* 관리자도 처음에는 자기 담당 학생 기준으로 보여 줍니다 (담당 학생이 있을 때) */
+      if (!this.scopeInit) {
+        this.scopeInit = true;
+        if ([...this.students.values()].some(x => x.teacher_email === this.email)) ft.value = this.email;
+      }
     }
   },
 
+  /* 제출 현황을 낼 학생: 담당 교사는 자기 학생, 관리자는 '담당 교사' 필터에 따라 */
+  scopeList() {
+    const all = [...this.students.values()];
+    if (!this.isAdmin) return all;
+    const ft = $('fteacher') ? $('fteacher').value : '';
+    if (ft === '__none') return all.filter(s => !s.teacher_email);
+    if (ft) return all.filter(s => s.teacher_email === ft);
+    return all;
+  },
+  scopeLabel() {
+    if (!this.isAdmin) return `${esc(this.tName(this.email))} 선생님 담당`;
+    const ft = $('fteacher') ? $('fteacher').value : '';
+    if (ft === '__none') return '담당 교사 미배정';
+    if (ft) return `${esc(this.tName(ft))} 선생님 담당`;
+    return '전체 학생';
+  },
+
   renderSummary() {
-    const list = [...this.students.values()];
+    const list = this.scopeList();
+    const allStudents = [...this.students.values()];
     const n = list.length;
     const count = key => { const c = { none: 0, waiting: 0, revise: 0, done: 0 }; list.forEach(s => c[s[key].status || 'none']++); return c; };
     const bar = (cnt, thin) => `<div class="bar${thin ? ' thin' : ''}">${ORDER.filter(k => k !== 'none').map(k => n && cnt[k] ? `<span style="width:${cnt[k] / n * 100}%;background:${ST[k].color}" title="${ST[k].label} ${cnt[k]}명"></span>` : '').join('')}</div>`;
@@ -860,7 +884,7 @@ const Teacher = {
     let html = '';
     const allIn = list.filter(s => PARTS.every(g => s[g.key].status !== 'none')).length;
     const pc = count('plan');
-    html += `<div class="sum"><h2>제출 현황</h2><div class="big">${allIn}<small>/ ${n}명 최종보고서 세 부분 모두 제출</small></div>
+    html += `<div class="sum"><h2>제출 현황 <span class="scope">${this.scopeLabel()} ${n}명</span></h2><div class="big">${allIn}<small>/ ${n}명 최종보고서 세 부분 모두 제출</small></div>
       <div class="parts"><div class="part-row plan-row"><span class="pl">계획서</span>${bar(pc, true)}<span class="pn">${n - pc.none}/${n}</span></div>${PARTS.map(g => { const c = count(g.key); return `<div class="part-row"><span class="pl">${g.label}</span>${bar(c, true)}<span class="pn">${n - c.none}/${n}</span></div>`; }).join('')}</div>
       ${(() => { const ex = list.filter(s => s.extra_required); if (!ex.length) return ''; const c = { none: 0, waiting: 0, revise: 0, done: 0 }; ex.forEach(s => c[s.extra.status || 'none']++); const m = ex.length;
         return `<div class="part-row extra-row"><span class="pl">개인연구보고서</span><div class="bar thin">${ORDER.filter(k => k !== 'none').map(k => c[k] ? `<span style="width:${c[k] / m * 100}%;background:${ST[k].color}"></span>` : '').join('')}</div><span class="pn">${m - c.none}/${m}</span></div>`; })()}
@@ -877,19 +901,51 @@ const Teacher = {
       <button class="todo late" data-f="late"><span>마감 지나고 미제출한 학생</span><span class="n">${late}</span></button>
       ${nomail ? `<button class="todo mail" data-f="nomail"><span>이메일 미등록 (로그인 불가)</span><span class="n">${nomail}</span></button>` : ''}
       ${this.isAdmin && this.teachers.some(t => !t.name) ? `<button class="todo mail" data-open-teachers="1"><span>이름이 없는 선생님 계정</span><span class="n">${this.teachers.filter(t => !t.name).length}</span></button>` : ''}
-      ${this.isAdmin && list.some(s => !s.teacher_email) ? `<button class="todo mail" data-tf="__none"><span>담당 교사 미배정</span><span class="n">${list.filter(s => !s.teacher_email).length}</span></button>` : ''}
+      ${this.isAdmin && allStudents.some(s => !s.teacher_email) ? `<button class="todo mail" data-tf="__none"><span>담당 교사 미배정</span><span class="n">${allStudents.filter(s => !s.teacher_email).length}</span></button>` : ''}
       ${noconsent ? `<button class="todo mail" data-f="noconsent"><span>개인정보 동의 전</span><span class="n">${noconsent}</span></button>` : ''}
       ${wait ? `<button class="btn primary" id="rvStart">대기 중인 제출물 차례로 검토하기</button>` : ''}
     </div></div>`;
     $('summary').innerHTML = html;
     $('summary').querySelectorAll('.todo').forEach(b => b.onclick = () => {
       if (b.dataset.openTeachers) { this.openTeachers(); return; }
-      if (b.dataset.tf) { $('fteacher').value = b.dataset.tf; $('fstatus').value = ''; }
+      if (b.dataset.tf) { $('fteacher').value = b.dataset.tf; $('fstatus').value = ''; this.renderSummary(); }
       else $('fstatus').value = b.dataset.f;
       this.renderRows();
     });
     const rs = $('rvStart');
     if (rs) rs.onclick = () => this.openReview(this.waitingQueue(), 0);
+    this.renderTeacherStats();
+  },
+
+  /* 관리자: 선생님별 제출 현황표 */
+  renderTeacherStats() {
+    const box = $('tstats');
+    if (!box) return;
+    box.hidden = !this.isAdmin || this.teachers.length < 1;
+    if (box.hidden) return;
+    const all = [...this.students.values()];
+    const groups = this.teachers.map(t => ({ key: t.email, label: this.tName(t.email), list: all.filter(s => s.teacher_email === t.email) }));
+    const un = all.filter(s => !s.teacher_email);
+    if (un.length) groups.push({ key: '__none', label: '미배정', list: un });
+    const cols = [PLAN, ...PARTS, OUTPUT];
+    const ft = $('fteacher').value;
+    const row = g => {
+      const n = g.list.length;
+      const cell = st => { const k = g.list.filter(s => s[st.key].status !== 'none').length; const pct = n ? k / n : 0; return `<td><span class="ts-n">${k}/${n}</span><span class="ts-bar"><i style="width:${(pct * 100).toFixed(0)}%"></i></span></td>`; };
+      const wait = g.list.reduce((a, s) => a + stagesFor(s).filter(x => s[x.key].status === 'waiting').length, 0);
+      const late = g.list.filter(s => stagesFor(s).some(x => s[x.key].status === 'none' && isPast(dueFrom(this.settings, x.due)))).length;
+      return `<tr data-ts="${esc(g.key)}" class="${ft === g.key ? 'on' : ''}"><th scope="row">${esc(g.label)}</th><td>${n}명</td>${cols.map(cell).join('')}
+        <td class="${wait ? 'ts-wait' : ''}">${wait}</td><td class="${late ? 'ts-late' : ''}">${late}</td></tr>`;
+    };
+    $('tstatsBox').innerHTML = `<table class="ts-table"><thead><tr><th>선생님</th><th>담당</th>${cols.map(c => `<th>${c.label}</th>`).join('')}<th>피드백 대기</th><th>마감 지난 미제출</th></tr></thead>
+      <tbody>${groups.map(row).join('')}
+      <tr data-ts="" class="ts-all ${ft === '' ? 'on' : ''}"><th scope="row">전체</th><td>${all.length}명</td>${cols.map(c => { const k = all.filter(s => s[c.key].status !== 'none').length; return `<td><span class="ts-n">${k}/${all.length}</span></td>`; }).join('')}<td></td><td></td></tr></tbody></table>
+      <p class="hint">줄을 누르면 그 선생님 담당 학생 기준으로 위 제출 현황과 목록이 바뀌어요.</p>`;
+    $('tstatsBox').querySelectorAll('tr[data-ts]').forEach(tr => tr.onclick = () => {
+      $('fteacher').value = tr.dataset.ts;
+      this.renderSummary();
+      this.renderRows();
+    });
   },
 
   renderClassFilter() {
@@ -1222,7 +1278,7 @@ const Teacher = {
 
   waitingQueue() {
     const q = [];
-    for (const s of this.students.values()) {
+    for (const s of this.scopeList()) {
       for (const g of STAGES) {
         if (s[g.key].status === 'waiting' && s[g.key].file_path) q.push({ id: s.id, stage: g.key, at: s[g.key].submitted_at || '' });
       }

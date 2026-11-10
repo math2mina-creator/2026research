@@ -465,3 +465,21 @@ mark.memo-hl.on{background:#ffcf33;box-shadow:0 0 0 3px rgba(240,180,0,.35)}
 .hist li.k-cancel::before{border-color:var(--ink-3)}
 .cancel-hint{margin:-6px 0 10px}
 .filebox .btn.danger{margin-left:2px}
+
+/* scoped summary + per-teacher stats */
+.sum h2 .scope{display:inline-block;margin-left:6px;padding:0 8px;border-radius:999px;background:var(--blue-bg);color:var(--blue);font-size:12.5px;font-weight:600}
+.tstats{background:var(--surface);border:1px solid var(--line);border-radius:10px;margin:-8px 0 20px;padding:0 16px}
+.tstats > summary{cursor:pointer;padding:12px 0;font-weight:600;font-size:14px;color:var(--ink-2)}
+.tstats-box{overflow-x:auto;padding-bottom:12px}
+.ts-table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+.ts-table th,.ts-table td{padding:8px 10px;border-bottom:1px solid var(--line-2);text-align:left;white-space:nowrap}
+.ts-table thead th{font-size:12.5px;color:var(--ink-3);font-weight:600}
+.ts-table tbody tr{cursor:pointer}
+.ts-table tbody tr:hover{background:var(--paper)}
+.ts-table tbody tr.on{background:var(--blue-bg)}
+.ts-table tbody tr.ts-all th,.ts-table tbody tr.ts-all td{color:var(--ink-3);border-bottom:0}
+.ts-n{display:block;font-variant-numeric:tabular-nums}
+.ts-bar{display:block;width:56px;height:4px;border-radius:2px;background:var(--none-bg);margin-top:3px;overflow:hidden}
+.ts-bar i{display:block;height:100%;background:var(--blue)}
+.ts-wait{color:var(--blue);font-weight:600}
+.ts-late{color:var(--stamp);font-weight:600}
