@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-10e';
+const APP_VERSION = '2026-11-10f';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -1039,11 +1039,12 @@ const Teacher = {
     const evHTML = evs.map(e => {
       let body = '';
       if (e.kind === 'submit') body = `<div class="note">학생이 파일을 제출했습니다: ${e.file_path ? `<button class="linkbtn" data-open="${esc(e.file_path)}">${esc(e.file_name || '파일')}</button>` : esc(e.file_name || '')}</div>`;
+      else if (e.kind === 'cancel') body = `<div class="note cancel-note">학생이 제출을 취소했습니다: ${e.file_path ? `<button class="linkbtn" data-open="${esc(e.file_path)}">${esc(e.file_name || '파일')}</button>` : esc(e.file_name || '')}</div>`;
       else if (e.note) body = `<div class="note">${esc(e.note)}</div>`;
-      const who = e.kind === 'submit' ? '학생 제출' : e.kind === 'feedback' ? '피드백' : '상태 변경';
+      const who = e.kind === 'submit' ? '학생 제출' : e.kind === 'cancel' ? '학생 제출 취소' : e.kind === 'feedback' ? '피드백' : '상태 변경';
       const seen = e.kind === 'feedback' ? (e.seen_at ? `<span class="seen">학생 읽음 ${fmtDT(e.seen_at)}</span>` : '<span class="unseen">학생 아직 안 읽음</span>') : '';
       return `<li class="k-${e.kind}"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>${who}</span>${e.status ? `<span class="pill ${e.status}">${ST[e.status].label}</span>` : ''}${seen}
-        ${e.kind !== 'submit' ? `<button class="del" data-del="${esc(e.id)}" aria-label="이 기록 삭제">삭제</button>` : ''}</div>${body}</li>`;
+        ${e.kind !== 'submit' && e.kind !== 'cancel' ? `<button class="del" data-del="${esc(e.id)}" aria-label="이 기록 삭제">삭제</button>` : ''}</div>${body}</li>`;
     }).join('');
     return `<section class="stage" data-stage="${g.key}">
       ${g.key === 'plan' ? '<h3 class="group-h">연구계획서</h3>' : ''}${g.key === PARTS[0].key ? '<h3 class="group-h">최종보고서</h3>' : ''}${g.key === 'extra' ? '<h3 class="group-h">개인연구보고서</h3>' : ''}${g.key === 'output' ? '<h3 class="group-h">산출물</h3>' : ''}
@@ -2126,11 +2127,11 @@ const Teacher = {
 
   csvFeedback(list) {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-    const kind = { submit: '학생 제출', feedback: '피드백', status: '상태 변경' };
+    const kind = { submit: '학생 제출', cancel: '학생 제출 취소', feedback: '피드백', status: '상태 변경' };
     const rows = [['학번', '이름', '항목', '시각', '종류', '상태', '내용·파일', '학생 읽음'].map(q).join(',')];
     list.forEach(s => stagesFor(s).forEach(g => [...s.ev[g.key]].sort((a, b) => a.created_at.localeCompare(b.created_at)).forEach(e => rows.push([
       s.sid, s.name, g.full, fmtDT(e.created_at), kind[e.kind] || e.kind, e.status ? ST[e.status].label : '',
-      e.kind === 'submit' ? (e.file_name || '') : (e.note || ''), e.kind === 'feedback' ? (e.seen_at ? fmtDT(e.seen_at) : '안 읽음') : ''
+      e.kind === 'submit' || e.kind === 'cancel' ? (e.file_name || '') : (e.note || ''), e.kind === 'feedback' ? (e.seen_at ? fmtDT(e.seen_at) : '안 읽음') : ''
     ].map(q).join(',')))));
     (this.memos || []).filter(m => list.some(s => s.id === m.student_id)).forEach(m => {
       const s = list.find(x => x.id === m.student_id), g = STAGES.find(x => x.key === m.stage);
@@ -2552,6 +2553,8 @@ const Student = {
       done: '선생님이 확인을 마쳤습니다.'
     }[k];
     const timeline = evs.map(e => {
+      if (e.kind === 'cancel') return `<li class="k-cancel"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>제출 취소</span></div>
+        <div class="note cancel-note">${esc(e.file_name || '제출 파일')}</div></li>`;
       if (e.kind === 'submit') return `<li class="k-submit"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>내가 제출</span></div>
         <div class="note">${e.file_path ? `<button class="linkbtn" data-open="${esc(e.file_path)}">${esc(e.file_name || '제출 파일')}</button>` : esc(e.file_name || '')}</div></li>`;
       if (e.kind === 'feedback') return `<li class="k-feedback"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>선생님 피드백</span>${e.status ? `<span class="pill ${e.status}">${ST[e.status].label}</span>` : ''}${this.unseen.has(e.id) ? '<span class="newb">새 피드백</span>' : ''}</div>
@@ -2564,7 +2567,8 @@ const Student = {
       ${this.tplLinks(g.key)}
       <div class="status-line"><span class="pill ${k}">${ST[k].label}</span>${sub.submitted_at ? `<span class="hint">${fmtDT(sub.submitted_at)} 제출</span>` : ''}</div>
       <p class="hint" style="margin-bottom:12px">${guide}</p>
-      ${sub.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(sub.file_name || '제출 파일')}</span><button class="btn sm" data-open="${esc(sub.file_path)}">열기</button></div>` : ''}
+      ${sub.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(sub.file_name || '제출 파일')}</span><button class="btn sm" data-open="${esc(sub.file_path)}">열기</button>${k === 'waiting' ? `<button class="btn sm danger" data-cancel="${g.key}">제출 취소</button>` : ''}</div>
+        ${k === 'waiting' ? '<p class="hint cancel-hint">잘못 올렸다면 선생님이 확인하기 전까지 제출을 취소할 수 있어요.</p>' : ''}` : ''}
       ${canSubmit ? `<div class="upload" data-drop="${g.key}">
           <button class="btn primary" data-pick="${g.key}">${sub.file_path ? '수정본 제출하기' : '파일 선택해서 제출하기'}</button>
           <input type="file" accept="${acceptFor(g)}" data-file="${g.key}">
@@ -2615,6 +2619,19 @@ const Student = {
       card.scrollIntoView({ behavior: 'smooth', block: 'start' });
       card.classList.add('flash');
       setTimeout(() => card.classList.remove('flash'), 1200);
+    });
+    app.querySelectorAll('[data-cancel]').forEach(b => b.onclick = async () => {
+      if (!b.classList.contains('armed')) {
+        b.classList.add('armed'); b.textContent = '정말 취소할까요?';
+        setTimeout(() => { if (b.isConnected) { b.classList.remove('armed'); b.textContent = '제출 취소'; } }, 4000);
+        return;
+      }
+      b.disabled = true;
+      const { data, error } = await sb.rpc('cancel_submission', { p_stage: b.dataset.cancel });
+      if (error) { toast(error.message || '제출을 취소하지 못했습니다.'); b.disabled = false; return; }
+      try { await this.load(); } catch (e) { /* 화면만 다시 */ }
+      this.render();
+      toast(data === 'none' ? '제출을 취소했습니다. 다시 올려 주세요.' : '제출을 취소하고 이전에 낸 파일로 되돌렸습니다.');
     });
     app.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => downloadTemplate(this.templates.find(t => t.id === b.dataset.tpl)));
     app.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => app.querySelector(`[data-file="${b.dataset.pick}"]`).click());

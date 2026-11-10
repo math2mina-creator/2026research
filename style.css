@@ -460,3 +460,8 @@ mark.memo-hl.on{background:#ffcf33;box-shadow:0 0 0 3px rgba(240,180,0,.35)}
 .memo-list .hmeta{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-3);flex-wrap:wrap}
 .memo-list .del{margin-left:auto;background:none;border:0;color:var(--ink-3);cursor:pointer;font-size:12.5px;padding:2px 4px}
 .memo-list .del:hover{color:var(--stamp)}
+.cancel-note{color:var(--ink-3);text-decoration:line-through;text-decoration-color:var(--line)}
+.cancel-note .linkbtn{color:var(--ink-3)}
+.hist li.k-cancel::before{border-color:var(--ink-3)}
+.cancel-hint{margin:-6px 0 10px}
+.filebox .btn.danger{margin-left:2px}
