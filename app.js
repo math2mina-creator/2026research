@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-12d';
+const APP_VERSION = '2026-11-13';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -562,7 +562,7 @@ const Teacher = {
     this.memoOK = !mm.error;
     this.memos = mm.error ? [] : (mm.data || []);
     const m = new Map();
-    for (const s of st) m.set(s.id, { ...s, field: s.field || '', topic: s.topic || '', email: s.email || '', sid: s.sid || '', cls: s.cls || '', memo: '', ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() });
+    for (const s of st) m.set(s.id, { ...s, field: s.field || '', topic: s.topic || '', career: s.career || '', email: s.email || '', sid: s.sid || '', cls: s.cls || '', memo: '', ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() });
     for (const n of notes) if (m.has(n.student_id)) m.get(n.student_id).memo = n.memo || '';
     for (const x of sub) if (m.has(x.student_id) && STAGES.some(g => g.key === x.stage)) m.get(x.student_id)[x.stage] = { ...this.blank(), ...x, link: x.link || '' };
     for (const e of ev) if (m.has(e.student_id) && m.get(e.student_id).ev[e.stage]) m.get(e.student_id).ev[e.stage].push(e);
@@ -1025,7 +1025,7 @@ const Teacher = {
 
   matches(s) {
     const q = $('q').value.trim().toLowerCase();
-    if (q && !(s.name + ' ' + s.sid + ' ' + s.topic + ' ' + s.field + ' ' + s.email).toLowerCase().includes(q)) return false;
+    if (q && !(s.name + ' ' + s.sid + ' ' + s.topic + ' ' + s.field + ' ' + s.email + ' ' + (s.career || '')).toLowerCase().includes(q)) return false;
     const c = $('fcls').value;
     if (c && String(s.cls) !== c) return false;
     const ft = this.isAdmin ? $('fteacher').value : '';
@@ -1112,7 +1112,7 @@ const Teacher = {
     });
     $('rows').innerHTML = list.map(s => `<tr data-id="${esc(s.id)}" tabindex="0">
       <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${this.isAdmin ? (s.teacher_email ? `<span class="tch">${esc(this.tName(s.teacher_email))}</span>` : '<span class="tch none">미배정</span>') : ''}${!s.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(s) ? '' : '<span class="nomail">동의 전</span>'}</td>
-      <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${s.topic_updated_at && (Date.now() - new Date(s.topic_updated_at)) < 7 * 86400000 ? '<span class="tnew">학생 수정</span>' : ''}${esc(s.topic) || '주제 미정'}</div></td>
+      <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${s.topic_updated_at && (Date.now() - new Date(s.topic_updated_at)) < 7 * 86400000 ? '<span class="tnew">학생 수정</span>' : ''}${esc(s.topic) || '주제 미정'}</div>${s.career ? `<div class="career-sm" title="진로 희망">🎯 ${esc(s.career)}</div>` : ''}</td>
       <td class="c-prog">${this.progressCell(s)}</td>
       <td class="c-todo">${this.todoCell(s)}</td>
       <td class="c-recent"><span class="recent">${rel(this.lastActivity(s))}</span></td></tr>`).join('');
@@ -1149,7 +1149,7 @@ const Teacher = {
     if (id && !src) return;
     this.isNew = !id;
     this.openId = id || null;
-    const base = src ? clone(src) : { id: null, sid: '', name: '', cls: '', email: '', field: '', topic: '', memo: '', teacher_email: this.isAdmin ? (['', '__none'].includes($('fteacher').value) ? '' : $('fteacher').value) : this.email, ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() };
+    const base = src ? clone(src) : { id: null, sid: '', name: '', cls: '', career: '', email: '', field: '', topic: '', memo: '', teacher_email: this.isAdmin ? (['', '__none'].includes($('fteacher').value) ? '' : $('fteacher').value) : this.email, ...Object.fromEntries(STAGES.map(g => [g.key, this.blank()])), ev: evMap() };
     for (const g of STAGES) base[g.key].date = dateOf(base[g.key].submitted_at);
     this.draft = base;
     this.orig = clone(base);
@@ -1267,6 +1267,8 @@ const Teacher = {
       <div class="field"><label class="l" for="f-email">학교 구글 이메일 (학생 로그인용)</label><input class="in" id="f-email" data-k="email" type="email" autocomplete="off" value="${esc(d.email)}"></div>
       <div class="field"><label class="l" for="f-topic">연구 주제</label><input class="in" id="f-topic" data-k="topic" value="${esc(d.topic)}">
         ${d.topic_updated_at ? `<p class="hint">학생이 ${fmtDT(d.topic_updated_at)}에 수정함${d.topic_prev ? ` · 이전 주제: ${esc(d.topic_prev)}` : ''}</p>` : ''}</div>
+      <div class="field"><label class="l" for="f-career">진로 희망</label><input class="in" id="f-career" data-k="career" maxlength="100" placeholder="예: 건축가, 수학 교사" value="${esc(d.career || '')}">
+        ${d.career_updated_at ? `<p class="hint">학생이 ${fmtDT(d.career_updated_at)}에 적음</p>` : ''}</div>
       <label class="agree small"><input type="checkbox" id="f-extra" ${d.extra_required ? 'checked' : ''}> <span>실험 대상 학생 (개인연구보고서 추가 제출)</span></label>
     </section>`;
     if (this.isNew) {
@@ -1288,6 +1290,7 @@ const Teacher = {
           <span class="d-done">확인 완료 <b>${done}</b> / ${gs.length}</span>
         </div>
         <p class="d-topic">${d.topic ? esc(d.topic) : '<span class="hint">연구 주제 미정</span>'}</p>
+        <p class="d-career">🎯 진로 희망 · ${d.career ? `<b>${esc(d.career)}</b>` : '<span class="hint">아직 적지 않음</span>'}</p>
         ${this.stepperHTML(d)}
       </section>
       <h2 class="d-sec">제출물</h2>
@@ -1361,6 +1364,7 @@ const Teacher = {
       email: d.email.trim().toLowerCase() || null,
       field: d.field.trim(),
       topic: d.topic.trim(),
+      career: (d.career || '').trim(),
       extra_required: !!d.extra_required
     };
     if (this.isAdmin) row.teacher_email = d.teacher_email || null;
@@ -1379,7 +1383,7 @@ const Teacher = {
         if (error) throw error;
         id = data.id;
       } else {
-        const changed = ['sid', 'name', 'cls', 'email', 'field', 'topic'].some(k => (row[k] || '') !== (o[k] || '')) || row.extra_required !== !!o.extra_required || (this.isAdmin && (row.teacher_email || '') !== (o.teacher_email || ''));
+        const changed = ['sid', 'name', 'cls', 'email', 'field', 'topic', 'career'].some(k => (row[k] || '') !== (o[k] || '')) || row.extra_required !== !!o.extra_required || (this.isAdmin && (row.teacher_email || '') !== (o.teacher_email || ''));
         if (changed) {
           const { error } = await sb.from('students').update({ ...row, updated_at: now }).eq('id', id);
           if (error) throw error;
@@ -2054,7 +2058,7 @@ const Teacher = {
 
 `;
       const body = [
-        `[연구 주제] ${hide(s.topic || '(없음)')}${s.field ? `\n[연구 분야] ${s.field}` : ''}`,
+        `[연구 주제] ${hide(s.topic || '(없음)')}${s.field ? `\n[연구 분야] ${s.field}` : ''}${s.career ? `\n[진로 희망] ${hide(s.career)}` : ''}`,
         ...sections.map(x => `\n===== ${x.label} =====\n${hide(x.text)}`),
         fbText ? `\n===== 선생님 피드백 기록 =====\n${hide(fbText)}` : '',
         files.length ? `\n(글로 옮기지 못한 제출물: ${files.map(f => `${f.label} - ${f.name}`).join(', ')} → 파일을 따로 첨부함)` : '',
@@ -2387,9 +2391,9 @@ const Teacher = {
   csvRoster(list) {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     const lastNote = arr => (arr.find(e => e.kind === 'feedback' && e.note) || {}).note || '';
-    const head = ['학번', '이름', '반', '담당 교사', '이메일', '연구 분야', '연구 주제', ...STAGES.flatMap(g => [g.full + ' 상태', g.full + ' 제출일', g.full + ' 최근 피드백']), '개인정보 동의일', '지도 메모'];
+    const head = ['학번', '이름', '반', '담당 교사', '이메일', '연구 분야', '연구 주제', '진로 희망', ...STAGES.flatMap(g => [g.full + ' 상태', g.full + ' 제출일', g.full + ' 최근 피드백']), '개인정보 동의일', '지도 메모'];
     const lines = [head.map(q).join(',')].concat(list.map(s => [
-      s.sid, s.name, s.cls, this.tName(s.teacher_email), s.email, s.field, s.topic,
+      s.sid, s.name, s.cls, this.tName(s.teacher_email), s.email, s.field, s.topic, s.career || '',
       ...STAGES.flatMap(g => applies(s, g) ? [ST[s[g.key].status].label, dateOf(s[g.key].submitted_at), lastNote(s.ev[g.key])] : ['해당 없음', '', '']), hasConsent(s) ? dateOf(s.consent_at) : '', s.memo
     ].map(q).join(',')));
     return '\uFEFF' + lines.join('\r\n');
@@ -2798,6 +2802,39 @@ const Student = {
     </section>`;
   },
 
+  careerView() {
+    const c = this.me.career;
+    return c
+      ? `<span>진로 희망: <b>${esc(c)}</b></span> <button class="linkbtn" id="cEdit">수정</button>`
+      : `<span class="hint">진로 희망을 아직 적지 않았어요.</span> <button class="linkbtn" id="cEdit">진로 희망 적기</button>`;
+  },
+  bindCareer() {
+    const box = $('careerBox');
+    const edit = $('cEdit');
+    if (!box || !edit) return;
+    edit.onclick = () => {
+      box.innerHTML = `<label class="l" for="cInput">진로 희망</label>
+        <input class="in" id="cInput" maxlength="100" placeholder="예: 건축가, 수학 교사, 데이터 과학자" value="${esc(this.me.career || '')}">
+        <div class="topic-actions"><span class="hint">선생님도 볼 수 있어요. 바뀌면 언제든 고칠 수 있어요.</span><button class="btn" id="cCancel">취소</button><button class="btn primary" id="cSave">저장</button></div>`;
+      const inp = $('cInput');
+      inp.focus();
+      const back = () => { box.innerHTML = this.careerView(); this.bindCareer(); };
+      $('cCancel').onclick = back;
+      const save = async () => {
+        const v = inp.value.trim();
+        if (v === (this.me.career || '')) { back(); return; }
+        $('cSave').disabled = true;
+        const { error } = await sb.rpc('update_my_career', { p_career: v });
+        if (error) { toast(error.message || '진로 희망을 저장하지 못했습니다.'); $('cSave').disabled = false; return; }
+        this.me.career = v;
+        back();
+        toast(v ? '진로 희망을 저장했습니다. 선생님 화면에도 보입니다.' : '진로 희망을 지웠습니다.');
+      };
+      $('cSave').onclick = save;
+      inp.onkeydown = e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') back(); };
+    };
+  },
+
   topicView() {
     const t = this.me.topic;
     return t
@@ -2903,6 +2940,7 @@ const Student = {
         <h1>${esc(me.name)}</h1>
         <p class="sub">${esc(me.sid || '')}${me.cls ? ` · ${esc(me.cls)}반` : ''} · ${esc(this.settings.program_name || '개인연구')}${this.teacherName ? ` · 담당 <b>${esc(this.teacherName)}</b> 선생님` : ''}</p>
         <div class="me-topic" id="topicBox">${this.topicView()}</div>
+        <div class="me-topic me-career" id="careerBox">${this.careerView()}</div>
       </div></header>
       ${this.annHTML()}
       ${this.progressHTML()}
@@ -2922,6 +2960,7 @@ const Student = {
     bindLogout();
     app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
     this.bindTopic();
+    this.bindCareer();
     const am = $('annMore');
     if (am) am.onclick = () => { app.querySelector('.ann-more').hidden = false; am.remove(); };
     app.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {

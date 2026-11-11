@@ -592,3 +592,9 @@ mark.memo-hl.on{background:#ffcf33;box-shadow:0 0 0 3px rgba(240,180,0,.35)}
 .card.moved{background:var(--paper);border-style:dashed;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
 .card.moved .card-h h2{font-size:18px}
 .card.moved .hint{margin:0}
+
+/* 진로 희망 */
+.me-career{margin-top:4px}
+.me-career input{max-width:62ch}
+.d-career{margin:-10px 0 16px;color:var(--ink-2);font-size:14.5px}
+.career-sm{font-size:12.5px;color:var(--ink-3);margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
