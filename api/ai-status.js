@@ -2915,15 +2915,33 @@ async function batchResults(url) {
     }
   }).filter(Boolean);
 }
+function tolerantJSON(text) {
+  let start = String(text || "").indexOf("{");
+  if (start < 0) return null;
+  let t = text.slice(start);
+  try {
+    return { obj: JSON.parse(t.slice(0, t.lastIndexOf("}") + 1)), repaired: !1 };
+  } catch {
+  }
+  let out = "", inStr = !1, escp = !1, stack = [];
+  for (let ch of t) {
+    if (out += ch, inStr) {
+      escp ? escp = !1 : ch === "\\" ? escp = !0 : ch === '"' && (inStr = !1);
+      continue;
+    }
+    ch === '"' ? inStr = !0 : ch === "{" ? stack.push("}") : ch === "[" ? stack.push("]") : (ch === "}" || ch === "]") && stack.pop();
+  }
+  for (escp && (out = out.slice(0, -1)), inStr && (out += '"'), out = out.replace(/,\s*$/, "").replace(/,\s*"[^"]*"\s*$/, "").replace(/:\s*$/, ': ""'); stack.length; ) out += stack.pop();
+  try {
+    return { obj: JSON.parse(out), repaired: !0 };
+  } catch {
+    return null;
+  }
+}
 function parseSummary(message) {
   let text = (message && message.content || []).filter((b) => b.type === "text").map((b) => b.text).join(`
-`).trim();
-  try {
-    let m = text.match(/\{[\s\S]*\}/);
-    return JSON.parse(m ? m[0] : text);
-  } catch {
-    return { summary: text, notes: ["AI \uC751\uB2F5 \uD615\uC2DD\uC774 \uC608\uC0C1\uACFC \uB2EC\uB77C \uC6D0\uBB38\uC744 \uADF8\uB300\uB85C \uB123\uC5C8\uC2B5\uB2C8\uB2E4."] };
-  }
+`).trim(), r = tolerantJSON(text);
+  return r && r.obj && typeof r.obj == "object" ? ((r.repaired || message && message.stop_reason === "max_tokens") && (r.obj.notes = [...Array.isArray(r.obj.notes) ? r.obj.notes : [], "\uC751\uB2F5\uC774 \uAE38\uC5B4 \uB05D\uBD80\uBD84\uC774 \uC798\uB838\uC5B4\uC694. \uD544\uC694\uD558\uBA74 \uB2E4\uC2DC \uC694\uC57D\uD558\uC138\uC694."]), r.obj) : { summary: text, notes: ["AI \uC751\uB2F5 \uD615\uC2DD\uC774 \uC608\uC0C1\uACFC \uB2EC\uB77C \uC6D0\uBB38\uC744 \uADF8\uB300\uB85C \uB123\uC5C8\uC2B5\uB2C8\uB2E4."] };
 }
 
 // ../../../mnt/user-data/outputs/research-site/server-src/ai-status.js

@@ -3573,7 +3573,7 @@ ${fbs.map((e) => `- ${String(e.created_at).slice(0, 10)}: ${hide(e.note || "\uBC
 [\uBCF4\uC644 \uC694\uCCAD \uC804\uC5D0 \uB0C8\uB358 \uB0B4\uC6A9 (\uC77C\uBD80)]
 ${hide(prevText)}` }), content.push({ type: "text", text: `
 \uC704 \uC790\uB8CC\uB85C \uC815\uD574\uC9C4 JSON \uD615\uC2DD\uC758 \uC694\uC57D\uC744 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.` }), {
-    params: { model: MODEL[part], max_tokens: part === "plan" ? 1200 : 2e3, system: partSystem(part), messages: [{ role: "user", content }] },
+    params: { model: MODEL[part], max_tokens: part === "plan" ? 3e3 : 4e3, system: partSystem(part), messages: [{ role: "user", content }] },
     source: { path: sub.file_path, name: sub.file_name || "" },
     info: { images: doc.images.length, skippedImages: doc.skippedImages, hadPrev: !!prevText }
   };
@@ -3602,7 +3602,7 @@ ${fb || "(\uC5C6\uC74C)"}
 
 \uC704 \uC790\uB8CC\uB85C \uC815\uD574\uC9C4 JSON \uD615\uC2DD\uC758 \uC804\uCCB4 \uC694\uC57D\uC744 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.` }];
   return {
-    params: { model: MODEL.overall, max_tokens: 3e3, system: OVERALL_SYSTEM, messages: [{ role: "user", content }] },
+    params: { model: MODEL.overall, max_tokens: 6e3, system: OVERALL_SYSTEM, messages: [{ role: "user", content }] },
     source: { path: null, name: "" }
   };
 }
@@ -3619,15 +3619,33 @@ async function callMessage(params) {
   if (!r.ok) throw apiError(r.status, out);
   return out;
 }
+function tolerantJSON(text) {
+  let start = String(text || "").indexOf("{");
+  if (start < 0) return null;
+  let t = text.slice(start);
+  try {
+    return { obj: JSON.parse(t.slice(0, t.lastIndexOf("}") + 1)), repaired: !1 };
+  } catch {
+  }
+  let out = "", inStr = !1, escp = !1, stack = [];
+  for (let ch of t) {
+    if (out += ch, inStr) {
+      escp ? escp = !1 : ch === "\\" ? escp = !0 : ch === '"' && (inStr = !1);
+      continue;
+    }
+    ch === '"' ? inStr = !0 : ch === "{" ? stack.push("}") : ch === "[" ? stack.push("]") : (ch === "}" || ch === "]") && stack.pop();
+  }
+  for (escp && (out = out.slice(0, -1)), inStr && (out += '"'), out = out.replace(/,\s*$/, "").replace(/,\s*"[^"]*"\s*$/, "").replace(/:\s*$/, ': ""'); stack.length; ) out += stack.pop();
+  try {
+    return { obj: JSON.parse(out), repaired: !0 };
+  } catch {
+    return null;
+  }
+}
 function parseSummary(message) {
   let text = (message && message.content || []).filter((b) => b.type === "text").map((b) => b.text).join(`
-`).trim();
-  try {
-    let m = text.match(/\{[\s\S]*\}/);
-    return JSON.parse(m ? m[0] : text);
-  } catch {
-    return { summary: text, notes: ["AI \uC751\uB2F5 \uD615\uC2DD\uC774 \uC608\uC0C1\uACFC \uB2EC\uB77C \uC6D0\uBB38\uC744 \uADF8\uB300\uB85C \uB123\uC5C8\uC2B5\uB2C8\uB2E4."] };
-  }
+`).trim(), r = tolerantJSON(text);
+  return r && r.obj && typeof r.obj == "object" ? ((r.repaired || message && message.stop_reason === "max_tokens") && (r.obj.notes = [...Array.isArray(r.obj.notes) ? r.obj.notes : [], "\uC751\uB2F5\uC774 \uAE38\uC5B4 \uB05D\uBD80\uBD84\uC774 \uC798\uB838\uC5B4\uC694. \uD544\uC694\uD558\uBA74 \uB2E4\uC2DC \uC694\uC57D\uD558\uC138\uC694."]), r.obj) : { summary: text, notes: ["AI \uC751\uB2F5 \uD615\uC2DD\uC774 \uC608\uC0C1\uACFC \uB2EC\uB77C \uC6D0\uBB38\uC744 \uADF8\uB300\uB85C \uB123\uC5C8\uC2B5\uB2C8\uB2E4."] };
 }
 
 // ../../../mnt/user-data/outputs/research-site/server-src/ai-now.js

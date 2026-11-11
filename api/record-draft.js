@@ -2930,6 +2930,29 @@ async function callMessage(params) {
   if (!r.ok) throw apiError(r.status, out);
   return out;
 }
+function tolerantJSON(text) {
+  let start = String(text || "").indexOf("{");
+  if (start < 0) return null;
+  let t = text.slice(start);
+  try {
+    return { obj: JSON.parse(t.slice(0, t.lastIndexOf("}") + 1)), repaired: !1 };
+  } catch {
+  }
+  let out = "", inStr = !1, escp = !1, stack = [];
+  for (let ch of t) {
+    if (out += ch, inStr) {
+      escp ? escp = !1 : ch === "\\" ? escp = !0 : ch === '"' && (inStr = !1);
+      continue;
+    }
+    ch === '"' ? inStr = !0 : ch === "{" ? stack.push("}") : ch === "[" ? stack.push("]") : (ch === "}" || ch === "]") && stack.pop();
+  }
+  for (escp && (out = out.slice(0, -1)), inStr && (out += '"'), out = out.replace(/,\s*$/, "").replace(/,\s*"[^"]*"\s*$/, "").replace(/:\s*$/, ': ""'); stack.length; ) out += stack.pop();
+  try {
+    return { obj: JSON.parse(out), repaired: !0 };
+  } catch {
+    return null;
+  }
+}
 
 // ../../../mnt/user-data/outputs/research-site/server-src/record-draft.js
 var SYSTEM = `\uB2F9\uC2E0\uC740 \uD55C\uAD6D \uACE0\uB4F1\uD559\uAD50 \uAD50\uC0AC\uAC00 \uD559\uAD50\uC0DD\uD65C\uAE30\uB85D\uBD80(\uC0DD\uAE30\uBD80)\uB97C \uC4F0\uB3C4\uB85D \uB3D5\uB294 \uBCF4\uC870\uC790\uC785\uB2C8\uB2E4.
@@ -2950,6 +2973,10 @@ async function handler(req, res) {
     if (!await canManage(db, id)) return send(res, 403, { error: "\uC774 \uD559\uC0DD\uC758 \uC0DD\uAE30\uBD80 \uCD08\uC548\uC744 \uB9CC\uB4E4 \uAD8C\uD55C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." });
     let [st] = await db.select("students", `id=eq.${id}&select=name,sid,email,topic,field,career`), [ov] = await db.select("ai_summaries", `student_id=eq.${id}&part=eq.overall&status=eq.done&select=summary,updated_at`);
     if (!ov || !ov.summary) return send(res, 409, { error: "\uC804\uCCB4 \uC694\uC57D\uC744 \uBA3C\uC800 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694. (AI \uD65C\uB3D9 \uC694\uC57D \u2192 \uC804\uCCB4 \uC694\uC57D)" });
+    if (typeof ov.summary.summary == "string" && /^\s*\{\s*"/.test(ov.summary.summary)) {
+      let r = tolerantJSON(ov.summary.summary);
+      r && r.obj && (ov.summary = r.obj);
+    }
     let hide = masker(st || {}), area = String(body.area || "\uACFC\uBAA9 \uC138\uBD80\uB2A5\uB825 \uBC0F \uD2B9\uAE30\uC0AC\uD56D").slice(0, 60), subject = String(body.subject || "").slice(0, 40), length = Math.min(1500, Math.max(150, parseInt(body.length, 10) || 500)), msg = await callMessage({
       model: process.env.CLAUDE_MODEL || MODEL.overall,
       max_tokens: 2500,

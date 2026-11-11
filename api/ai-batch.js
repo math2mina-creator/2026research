@@ -3574,7 +3574,7 @@ ${fbs.map((e) => `- ${String(e.created_at).slice(0, 10)}: ${hide(e.note || "\uBC
 [\uBCF4\uC644 \uC694\uCCAD \uC804\uC5D0 \uB0C8\uB358 \uB0B4\uC6A9 (\uC77C\uBD80)]
 ${hide(prevText)}` }), content.push({ type: "text", text: `
 \uC704 \uC790\uB8CC\uB85C \uC815\uD574\uC9C4 JSON \uD615\uC2DD\uC758 \uC694\uC57D\uC744 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.` }), {
-    params: { model: MODEL[part], max_tokens: part === "plan" ? 1200 : 2e3, system: partSystem(part), messages: [{ role: "user", content }] },
+    params: { model: MODEL[part], max_tokens: part === "plan" ? 3e3 : 4e3, system: partSystem(part), messages: [{ role: "user", content }] },
     source: { path: sub.file_path, name: sub.file_name || "" },
     info: { images: doc.images.length, skippedImages: doc.skippedImages, hadPrev: !!prevText }
   };
@@ -3603,7 +3603,7 @@ ${fb || "(\uC5C6\uC74C)"}
 
 \uC704 \uC790\uB8CC\uB85C \uC815\uD574\uC9C4 JSON \uD615\uC2DD\uC758 \uC804\uCCB4 \uC694\uC57D\uC744 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.` }];
   return {
-    params: { model: MODEL.overall, max_tokens: 3e3, system: OVERALL_SYSTEM, messages: [{ role: "user", content }] },
+    params: { model: MODEL.overall, max_tokens: 6e3, system: OVERALL_SYSTEM, messages: [{ role: "user", content }] },
     source: { path: null, name: "" }
   };
 }
