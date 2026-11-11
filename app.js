@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-17';
+const APP_VERSION = '2026-11-17c';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -1958,10 +1958,12 @@ const Teacher = {
         <button class="btn" id="rvSave">저장</button>
         <button class="btn primary" id="rvSaveGo">${last ? '저장하고 닫기' : '저장하고 다음'}</button>
       </div>
+      ${this.rvAiHTML(it)}
       ${this.memoSideHTML(it)}
       ${hist ? `<h3 class="rv-h">이 단계에서 보낸 피드백</h3><ul class="hist">${hist}</ul>` : ''}`;
     const side = $('rvSide');
     this.bindMemoSide(it);
+    this.bindRvAi(it);
     side.querySelectorAll('input[name="rv-st"]').forEach(r => r.onchange = () => {
       rv.status = r.value;
       rv.dirty = true;
@@ -2289,6 +2291,67 @@ const Teacher = {
       if (this.ai && this.ai.sid === id) { this.ai.busy = false; setMsg(''); const b = $('aiGo'); if (b) b.disabled = false; }
       toast(e.message || '요약 자료를 만들지 못했습니다.');
     }
+  },
+
+  /* ===== 보면서 피드백 쓰기: 보고서 글 정리 (무료, AI 채팅용) ===== */
+  rvText: {},
+  rvAiHTML(it) {
+    const key = it.path || '';
+    const t = this.rvText[key];
+    const r = this.aiOK ? this.aiRow(it.s.id, it.stage) : null;
+    const sm = r && r.status === 'done' && r.summary ? fixAiSummary(r.summary) : null;
+    const fresh = sm && (!r.source_path || r.source_path === it.path);
+    const f = (label, v) => v && (Array.isArray(v) ? v.length : String(v).trim()) ? `<div class="ais-f"><b>${label}</b>${Array.isArray(v) ? `<ul>${v.map(x => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>` : `<p>${esc(v)}</p>`}</div>` : '';
+    let body;
+    if (!it.path) body = '<p class="hint">제출 파일이 없어요.</p>';
+    else if (!t || t.loading) body = '<p class="hint">보고서 글을 정리하는 중이에요.</p>';
+    else if (t.error) body = `<p class="hint warn">${esc(t.error)}</p>`;
+    else body = `<p class="hint">본문 ${t.text.length.toLocaleString()}자 · 이름·학번·이메일은 가렸어요.</p>
+      <details class="rv-textbox"><summary>보고서 본문 미리 보기</summary><pre>${esc(t.text.slice(0, 3000))}${t.text.length > 3000 ? '\n…' : ''}</pre></details>
+      <div class="ai-actions"><button class="btn sm primary" id="rvAiCopy">AI 채팅용으로 복사</button><a class="btn sm" href="https://claude.ai/new" target="_blank" rel="noopener noreferrer">Claude 열기 ↗</a></div>
+      <p class="hint">복사한 내용을 AI 채팅에 붙여넣으면 요약과 피드백 제안을 받을 수 있어요. 받은 내용은 위 피드백 칸에 고쳐서 넣으세요.</p>`;
+    return `<section class="rv-ai" id="rvAi"><h3 class="rv-h">보고서 글 정리 <span class="ai-tag">무료</span></h3>
+      ${fresh ? `<details class="rv-textbox" open><summary>이미 만든 AI 요약</summary>${f('요약', sm.summary)}${f('탐구 질문', sm.question)}${f('방법·과정', sm.method)}${f('결과·결론', sm.result)}${f('피드백 반영', sm.revision)}${f('확인할 점', sm.notes)}</details>` : ''}
+      ${body}</section>`;
+  },
+  bindRvAi(it) {
+    const key = it.path || '';
+    const redraw = () => {
+      const cur = this.rv && this.rvItem();
+      if (cur && cur.path === it.path) { const b = $('rvAi'); if (b) { b.outerHTML = this.rvAiHTML(it); this.bindRvAi(it); } }
+    };
+    if (key && !this.rvText[key]) {
+      this.rvText[key] = { loading: true };
+      (async () => {
+        try {
+          const r = await extractForAI(it.path, it.name);
+          if (!r.text || !r.text.trim()) throw new Error(r.skip ? `글을 뽑을 수 없는 파일이에요 (${r.skip}). 왼쪽 문서를 보고 직접 정리해 주세요.` : '본문 글을 찾지 못했어요. PDF·사진은 글을 뽑을 수 없어요.');
+          const s = it.s, nm = (s.name || '').trim();
+          let text = r.text.trim();
+          [nm, nm.length >= 3 ? nm.slice(1) : ''].filter(k => k.length >= 2).forEach(k => { text = text.split(k).join('○○'); });
+          if (s.sid) text = text.split(s.sid).join('(학번)');
+          if (s.email) text = text.split(s.email).join('(이메일)');
+          this.rvText[key] = { text };
+        } catch (e) {
+          this.rvText[key] = { error: (e && e.demo) ? e.message : (e && e.message) || '보고서 글을 정리하지 못했어요.' };
+        }
+        redraw();
+      })();
+      return;
+    }
+    const cp = $('rvAiCopy');
+    if (cp) cp.onclick = () => {
+      const t = this.rvText[key];
+      const fbs = it.s.ev[it.stage].filter(e => e.kind === 'feedback' && e.note).map(e => `- ${fmtDate(e.created_at)}: ${e.note}`);
+      const lines = [
+        `아래는 고등학생 개인연구 '${it.g.full}' 보고서 본문이에요. 학생 이름은 ○○로 가렸어요.`,
+        '① 핵심 내용을 5줄 이내로 요약하고, ② 잘한 점, ③ 보완할 점(어디를 어떻게 고칠지 구체적으로), ④ 학생에게 던질 질문을 정리한 뒤, ⑤ 학생에게 그대로 보낼 수 있는 따뜻하고 분명한 피드백 문단(3~6문장)을 써 주세요. 본문에 없는 내용은 지어내지 마세요.',
+        '', `[연구 주제] ${it.s.topic || '(없음)'}`,
+        ...(fbs.length ? ['', '[지금까지 준 피드백 — 이미 반영한 내용은 다시 지적하지 마세요]', ...fbs] : []),
+        '', '[보고서 본문]', t.text.slice(0, 30000)
+      ];
+      this.copyText(lines.join('\n'), '복사했어요. AI 채팅에 붙여넣으세요.');
+    };
   },
 
   /* ===== AI 활동 요약 ===== */
