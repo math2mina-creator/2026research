@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-14';
+const APP_VERSION = '2026-11-16';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -132,6 +132,32 @@ const STAGES = [
 ];
 const OUTPUT = STAGES.find(g => g.key === 'output');
 const PLAN = STAGES.find(g => g.key === 'plan');
+/* AI 활동 요약 */
+const AI_PARTS = [
+  { key: 'plan', label: '연구계획서', model: 'Haiku' },
+  { key: 'intro', label: '최종보고서 1. 서론', model: 'Sonnet' },
+  { key: 'body', label: '최종보고서 2. 본론', model: 'Sonnet' },
+  { key: 'conclusion', label: '최종보고서 3. 결론', model: 'Sonnet' },
+  { key: 'output', label: '확장 산출물: 산출물', model: 'Sonnet' },
+  { key: 'extra', label: '확장 산출물: 개인연구보고서', model: 'Sonnet' },
+  { key: 'overall', label: '전체 요약', model: 'Sonnet' }
+];
+const AI_MAX_GEN = 4;
+async function apiPost(path, body) {
+  const { data } = await sb.auth.getSession();
+  const token = data && data.session ? data.session.access_token : '';
+  let res;
+  try {
+    res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body || {}) });
+  } catch (e) { throw new Error('서버에 연결하지 못했습니다. Vercel 주소에서 열었는지 확인하세요.'); }
+  let out = null;
+  try { out = await res.json(); } catch (e) { out = null; }
+  if (!res.ok || !out) {
+    if (res.status === 404 && !out) throw new Error('AI 기능은 Vercel 주소(…vercel.app)에서만 쓸 수 있어요. api 폴더가 올라갔는지도 확인하세요.');
+    throw new Error((out && out.error) || `요청에 실패했습니다 (${res.status}).`);
+  }
+  return out;
+}
 /* 메일 알림용 앱스 스크립트 코드 (비밀값은 설정 창에서 채움) */
 const APPS_SCRIPT_CODE = "/**\n * 개인연구 사이트 · 학생 메일 알림\n * - 사이트(Supabase)가 보낸 신호를 받아 학생 학교 메일로 알림을 보냅니다.\n * - 메일에는 피드백 내용을 넣지 않고, 사이트에서 확인하라는 알림과 링크만 보냅니다.\n * - 같은 학생의 같은 항목은 10분 안에 한 번만 보냅니다.\n */\nconst SECRET = '__SECRET__';   // 사이트의 '메일 알림' 설정 창에 보이는 비밀값과 같아야 합니다.\n\nfunction doPost(e) {\n  try {\n    const d = JSON.parse(e.postData.contents || '{}');\n    if (d.secret !== SECRET) return out_({ ok: false, error: 'secret' });\n    if (!d.to || d.to.indexOf('@') < 0) return out_({ ok: false, error: 'no email' });\n\n    const cache = CacheService.getScriptCache();\n    const key = (d.kind === 'overdue' ? 'o:' : 'n:') + d.to + ':' + (d.stage || '');\n    if (!d.test && cache.get(key)) return out_({ ok: true, skipped: 'recent' });\n    cache.put(key, '1', d.kind === 'overdue' ? 21600 : 600);\n\n    if (d.kind === 'overdue') {\n      const t = (d.teacher || '담당') + ' 선생님';\n      const subj = '[개인연구] 제출 기한이 지났어요 · ' + (d.stageLabel || '');\n      const body =\n        '<div style=\"font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;font-size:15px;line-height:1.7;color:#17213A\">' +\n        '<p>' + esc_(d.name || '') + ' 학생, 안녕하세요.</p>' +\n        '<p><b>' + esc_(d.stageLabel || '') + '</b>의 제출 기한이 지났는데 아직 제출하지 않았어요.</p>' +\n        '<p>지금이라도 사이트에 올리고, 늦어진 이유가 있다면 ' + esc_(t) + '께 말씀드리세요.</p>' +\n        (d.site ? '<p><a href=\"' + esc_(d.site) + '\" style=\"display:inline-block;padding:10px 18px;background:#C02F29;color:#fff;border-radius:8px;text-decoration:none\">지금 제출하러 가기</a></p>' : '') +\n        '<p style=\"color:#7A849A;font-size:12px\">이미 제출했다면 이 메일은 무시해도 돼요. 이 메일은 자동으로 보내졌어요.</p></div>';\n      MailApp.sendEmail({ to: d.to, subject: subj, htmlBody: body, name: '개인연구 알림' });\n      return out_({ ok: true });\n    }\n\n    const what = d.kind === 'memo' ? '내 글에 본문 메모를 남겼어요'\n      : d.status === 'revise' ? '보완 요청을 보냈어요'\n      : d.status === 'done' ? '확인을 마쳤어요'\n      : d.kind === 'test' ? '테스트 메일이에요'\n      : '피드백을 남겼어요';\n    const teacher = (d.teacher || '담당') + ' 선생님';\n    const subject = '[개인연구] ' + (d.stageLabel || '') + ' · ' + teacher + '이 ' + what;\n    const site = d.site || '';\n    const html =\n      '<div style=\"font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;font-size:15px;line-height:1.7;color:#17213A\">' +\n      '<p>' + esc_(d.name || '') + ' 학생, 안녕하세요.</p>' +\n      '<p><b>' + esc_(d.stageLabel || '') + '</b>에 ' + esc_(teacher) + '이 ' + esc_(what) + '</p>' +\n      '<p>내용은 개인연구 사이트에서 확인하세요.</p>' +\n      (site ? '<p><a href=\"' + esc_(site) + '\" style=\"display:inline-block;padding:10px 18px;background:#17213A;color:#fff;border-radius:8px;text-decoration:none\">사이트에서 확인하기</a></p>' : '') +\n      '<p style=\"color:#7A849A;font-size:12px\">이 메일은 자동으로 보내졌어요. 답장하지 말고 사이트에서 확인해 주세요.</p></div>';\n\n    MailApp.sendEmail({ to: d.to, subject: subject, htmlBody: html, name: '개인연구 알림' });\n    return out_({ ok: true });\n  } catch (err) {\n    return out_({ ok: false, error: String(err) });\n  }\n}\n\n/* 처음 한 번 실행해서 '메일 보내기' 권한을 허용하세요. */\nfunction authorize() {\n  Logger.log('오늘 보낼 수 있는 메일 수: ' + MailApp.getRemainingDailyQuota());\n}\n\nfunction out_(o) {\n  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);\n}\nfunction esc_(s) {\n  return String(s).replace(/[&<>\"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]; });\n}\n";
 /* 양식을 보여 줄 위치 */
@@ -536,6 +562,7 @@ const Teacher = {
     this.renderAll();
     const m = location.hash.match(/^#student-([0-9a-zA-Z-]+)$/);
     if (m && this.students.has(m[1])) this.openDrawer(m[1], true);
+    if (this.aiBatches && this.aiBatches.length) this.checkAiBatches(false);
   },
 
   async load() {
@@ -558,6 +585,13 @@ const Teacher = {
     const [st, sub, ev, notes, set, tpls] = res.map(r => r.data);
     this.settings = set || {};
     this.templates = tpls || [];
+    const [as, ab] = await Promise.all([
+      sb.from('ai_summaries').select('id,student_id,part,status,model,summary,error,source_path,source_name,gen_count,updated_at,batch_id'),
+      sb.from('ai_batches').select('*').eq('status', 'in_progress').order('created_at', { ascending: true })
+    ]);
+    this.aiOK = !as.error;
+    this.aiSum = as.error ? [] : (as.data || []);
+    this.aiBatches = ab.error ? [] : (ab.data || []);
     const od = await sb.from('overdue_notices').select('*').order('sent_at', { ascending: false });
     this.overdueLog = od.error ? [] : (od.data || []);
     this.overdueOK = !od.error;
@@ -592,6 +626,7 @@ const Teacher = {
         <button class="btn admin-only" id="bAssign">담당 배정</button>
       </div>
       <div class="act-group">
+        <button class="btn" id="bAiSum">🤖 AI 요약</button>
         <button class="btn" id="bAnn">공지사항</button>
         <button class="btn admin-only" id="bTpl">양식 관리</button>
       </div>
@@ -735,6 +770,16 @@ const Teacher = {
       <div class="mfoot"><span class="msg" id="zCount"></span><button class="btn" data-close="mZip">닫기</button><button class="btn primary" id="zGo">내려받기</button></div>
     </div></div>
 
+    <div class="modal" id="mAiSum" role="dialog" aria-modal="true" aria-labelledby="mAiSumT"><div class="mbox wide">
+      <h2 id="mAiSumT">AI 활동 요약 <span class="ai-tag">선생님만</span></h2>
+      <p>파트별로 <b>일괄 생성</b>을 누르면 담당 학생 가운데 그 파일을 낸 학생을 한 번에 요약합니다 (Message Batches, 일반 요청의 절반 요금). 결과는 보통 1시간 안에, 늦으면 24시간 안에 나옵니다. 파트 요약이 끝난 뒤 <b>전체 요약</b>을 일괄 생성하세요.</p>
+      <p class="hint" id="aiScope"></p>
+      <div class="ai-tw"><table class="ts-table ai-table"><thead><tr><th>파트</th><th>모델</th><th>제출</th><th>완료</th><th>진행 중</th><th>제외·실패</th><th></th></tr></thead><tbody id="aiRows"></tbody></table></div>
+      <div class="ai-batches" id="aiBatchBox"></div>
+      <p class="hint">학생 이름·학번·이메일은 가린 뒤 보내고, hwp·hwpx의 본문 텍스트와 그림만 씁니다(표지 그림 제외). 늦게 낸 학생은 학생 페이지에서 <b>지금 요약</b>을 누르세요.</p>
+      <div class="mfoot"><span class="msg" id="aiMsgAll"></span><button class="btn" id="aiCheck">↻ 결과 확인</button><button class="btn" data-close="mAiSum">닫기</button></div>
+    </div></div>
+
     <div class="modal" id="mNotify" role="dialog" aria-modal="true" aria-labelledby="mNotifyT"><div class="mbox wide">
       <h2 id="mNotifyT">학생 메일 알림</h2>
       <p>선생님이 피드백, 보완 요청, 확인 완료, 본문 메모를 저장하면 학생 학교 메일로 “새 피드백이 있어요”와 사이트 링크가 자동으로 갑니다. 피드백 내용은 메일에 넣지 않고, 같은 학생의 같은 항목은 10분에 한 번만 보냅니다.</p>
@@ -818,6 +863,8 @@ const Teacher = {
     $('teachAdd').onclick = () => this.addTeacher();
     $('bAssign').onclick = () => this.openAssign();
     $('bAnn').onclick = () => this.openAnn();
+    $('bAiSum').onclick = () => this.openAiSum();
+    $('aiCheck').onclick = () => this.checkAiBatches(true);
     $('nfCopy').onclick = () => this.copyText(APPS_SCRIPT_CODE.replace('__SECRET__', this.nf.secret), '앱스 스크립트 코드를 복사했습니다. 새 프로젝트에 붙여넣으세요.');
     $('nfSave').onclick = () => this.saveNotify();
     $('nfTest').onclick = () => this.testNotify();
@@ -1368,7 +1415,10 @@ const Teacher = {
           <p class="hint" style="margin-top:12px">개인정보 수집·이용 동의: ${hasConsent(d) ? fmtDT(d.consent_at) + ' 동의함' + (/^data:image\/png;base64,/.test(d.consent_signature || '') ? `<br><img class="sig" src="${d.consent_signature}" alt="${esc(d.name)} 학생 서명">` : '') : '<span class="warn">아직 동의하지 않음</span> (학생이 처음 로그인할 때 동의 화면이 나옵니다)'}</p>
         </section>
       </div>
+      <h2 class="d-sec">AI 활동 요약과 생기부 초안</h2>
+      ${this.aiSumHTML()}
       ${this.aiHTML()}`;
+      this.bindAiSum();
       const dlm = $('dLateMail');
       if (dlm) dlm.onclick = () => this.sendOverdue([d.id], dlm);
       $('dBody').querySelectorAll('[data-go-fnow]').forEach(b => b.onclick = () => {
@@ -1990,20 +2040,33 @@ const Teacher = {
     const len = r.length_limit || 500;
     const pack = this.ai.pack;
     return `<section class="stage ai-box" id="aiBox">
-      <h3 class="group-h">생기부 요약 자료</h3>
+      <h3 class="group-h">생기부 초안 <span class="ai-tag">AI</span></h3>
       ${this.ai.missingTable ? '<p class="notice">초안을 저장하려면 Supabase에서 update-record-drafts.sql 을 먼저 실행하세요.</p>' : ''}
-      <p class="hint">${ready.ok ? '최종보고서 세 부분과 산출물이 모두 제출되어 요약 자료를 만들 수 있어요.' : `아직 안 낸 항목: <b>${ready.missing.join(', ')}</b>. 지금 있는 자료로 먼저 만들 수도 있어요.`}</p>
+      <p class="hint">${ready.ok ? '최종보고서 세 부분과 산출물이 모두 제출되어 초안을 만들 수 있어요.' : `아직 안 낸 항목: <b>${ready.missing.join(', ')}</b>. 지금 있는 자료로 먼저 만들 수도 있어요.`}</p>
       <div class="row3">
         <div class="field"><label class="l" for="aiArea">영역</label><select class="in" id="aiArea">${areas.map(a => `<option ${a === area ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
         <div class="field"><label class="l" for="aiSubject">과목명 (세특일 때)</label><input class="in" id="aiSubject" value="${esc(r.subject || '')}" placeholder="예: 수학"></div>
         <div class="field"><label class="l" for="aiLen">분량</label><select class="in" id="aiLen">${[300, 500, 700, 1000].map(n => `<option value="${n}" ${n === len ? 'selected' : ''}>${n}자 이내</option>`).join('')}</select></div>
       </div>
-      <div class="ai-opts">
-        <label class="agree small"><input type="checkbox" id="aiMask" checked> <span>학생 이름 가리기</span></label>
-        <label class="agree small"><input type="checkbox" id="aiPrompt" checked> <span>AI 작성 지시문 넣기</span></label>
-        <label class="agree small"><input type="checkbox" id="aiFb" checked> <span>선생님 피드백 포함</span></label>
+      ${(() => { const ov = this.aiRow(s.id, 'overall'); const ok = ov && ov.status === 'done';
+        return `<div class="ai-actions"><button class="btn ${ok ? 'primary' : ''}" id="aiGen" ${this.ai.busy || !ok ? 'disabled' : ''}>🤖 ${r.draft ? 'AI 초안 다시 만들기' : 'AI 초안 만들기'}</button><span class="hint" id="aiGenMsg">${esc(this.ai.genMsg || (ok ? '전체 요약을 바탕으로 초안을 만들어요.' : '전체 요약을 먼저 만들면 초안을 만들 수 있어요.'))}</span></div>`; })()}
+      ${(Array.isArray(r.evidence) && r.evidence.length) || (Array.isArray(r.check_points) && r.check_points.length) ? `
+        ${r.check_points && r.check_points.length ? `<details class="ai-more" open><summary>선생님이 확인할 점 ${r.check_points.length}개</summary><ul>${r.check_points.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
+        ${r.evidence && r.evidence.length ? `<details class="ai-more"><summary>근거가 된 제출물 내용 ${r.evidence.length}개</summary><ul>${r.evidence.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}` : ''}
+      <div class="ai-final">
+        <label class="l" for="aiDraft">생기부 초안 · 고쳐서 저장하세요</label>
+        <textarea class="in ai-draft" id="aiDraft" rows="8" placeholder="AI 초안 만들기를 누르거나, 직접 쓰거나 붙여넣으세요.">${esc(r.draft || '')}</textarea>
+        <div class="ai-count" id="aiCount"></div>
+        <div class="ai-actions"><button class="btn" id="aiCopy">복사</button><button class="btn primary" id="aiSave">초안 저장</button>
+          <span class="hint">${r.updated_at ? `${fmtDT(r.updated_at)} 저장${r.updated_by ? ' · ' + esc(this.tName(r.updated_by)) : ''}` : ''}</span></div>
       </div>
-      <div class="ai-actions"><button class="btn primary" id="aiGo" ${this.ai.busy ? 'disabled' : ''}>${pack ? '요약 자료 다시 만들기' : '요약 자료 만들기'}</button><span class="hint" id="aiMsg">${esc(this.ai.msg || '')}</span></div>
+      <details class="ai-alt" ${pack ? 'open' : ''}><summary>AI 사용료 없이: 요약 자료를 복사해서 AI 채팅에 직접 붙여넣기</summary>
+      <div class="ai-opts" style="margin-top:8px">
+        <label class="agree small"><input type="checkbox" id="aiMask" checked> <span>학생 이름 가리기</span></label>
+        <label class="agree small"><input type="checkbox" id="aiFb" checked> <span>선생님 피드백 포함</span></label>
+        <label class="agree small"><input type="checkbox" id="aiPrompt" checked> <span>AI 작성 지시문 넣기</span></label>
+      </div>
+      <div class="ai-actions"><button class="btn" id="aiGo" ${this.ai.busy ? 'disabled' : ''}>${pack ? '요약 자료 다시 만들기' : '요약 자료 만들기'}</button><span class="hint" id="aiMsg">${esc(this.ai.msg || '')}</span></div>
       ${pack ? `
         <label class="l" for="aiPack">요약 자료 · 복사해서 AI 채팅(예: Claude)에 붙여넣으세요</label>
         <textarea class="in ai-pack" id="aiPack" rows="10">${esc(pack.text)}</textarea>
@@ -2015,14 +2078,8 @@ const Teacher = {
         </div>
         ${pack.files.length ? `<div class="ai-files"><b>글로 옮기지 못한 제출물</b> · PDF와 사진은 AI 채팅에 파일로 직접 첨부하세요.
           <ul>${pack.files.map((f, i) => `<li>${esc(f.label)}: ${esc(f.name)} ${f.path ? `<button class="btn sm" data-aifile="${i}">받기</button>` : `<span class="hint">(${esc(f.why)})</span>`}</li>`).join('')}</ul></div>` : ''}` : ''}
-      <div class="ai-final">
-        <label class="l" for="aiDraft">생기부 초안 · AI가 써 준 글을 붙여넣고 고쳐서 저장하세요</label>
-        <textarea class="in ai-draft" id="aiDraft" rows="8" placeholder="AI 채팅에서 받은 초안을 여기에 붙여넣으세요.">${esc(r.draft || '')}</textarea>
-        <div class="ai-count" id="aiCount"></div>
-        <div class="ai-actions"><button class="btn" id="aiCopy">복사</button><button class="btn primary" id="aiSave">초안 저장</button>
-          <span class="hint">${r.updated_at ? `${fmtDT(r.updated_at)} 저장${r.updated_by ? ' · ' + esc(this.tName(r.updated_by)) : ''}` : ''}</span></div>
-      </div>
-      <p class="hint ai-warn">AI가 쓴 초안은 참고용이에요. 학생의 실제 활동과 맞는지 확인하고 학교생활기록부 기재요령에 맞게 직접 고쳐 쓰세요. 외부 AI에 붙여넣기 전에 개인정보(이름, 학번 등)가 가려졌는지 한 번 더 확인하세요.</p>
+      </details>
+      <p class="hint ai-warn">AI가 쓴 초안은 참고용이에요. 학생의 실제 활동과 맞는지 확인하고 학교생활기록부 기재요령에 맞게 직접 고쳐 쓰세요. AI 요약과 초안은 학생 이름·학번·이메일을 가린 뒤 Anthropic(Claude)으로 보내며, 학교 개인정보 지침을 지켜 주세요.</p>
     </section>`;
   },
 
@@ -2030,6 +2087,8 @@ const Teacher = {
     const go = $('aiGo');
     if (!go) return;
     go.onclick = () => this.buildPack();
+    const gen = $('aiGen');
+    if (gen) gen.onclick = () => this.generateAI();
     const ta = $('aiDraft');
     const lim = () => parseInt($('aiLen').value, 10);
     const upd = () => {
@@ -2055,6 +2114,29 @@ const Teacher = {
     }
   },
 
+  /* AI 초안: 전체 요약을 바탕으로 Vercel 서버 함수(/api/record-draft)가 만듭니다 */
+  async generateAI() {
+    const id = this.openId;
+    if (!id || this.ai.busy) return;
+    const ov = this.aiRow(id, 'overall');
+    if (!ov || ov.status !== 'done') { toast('전체 요약을 먼저 만들어 주세요. (위 AI 활동 요약 → 전체 요약)'); return; }
+    const setMsg = m => { this.ai.genMsg = m; const el = $('aiGenMsg'); if (el) el.textContent = m; };
+    this.ai.busy = true;
+    $('aiGen').disabled = true;
+    setMsg('전체 요약을 바탕으로 초안을 쓰는 중이에요. 20~40초 걸려요.');
+    try {
+      const data = await apiPost('/api/record-draft', { student_id: id, area: $('aiArea').value, subject: $('aiSubject').value.trim(), length: parseInt($('aiLen').value, 10) });
+      if (!this.ai || this.ai.sid !== id) return;
+      this.ai.busy = false;
+      this.ai.genMsg = '완료. 내용을 확인하고 고쳐서 저장하세요.';
+      await this.saveAI({ draft: data.draft || '', evidence: data.evidence || [], check_points: data.check || [], ai_text: data.raw || '' }, true);
+      toast('AI 초안을 만들었습니다. 확인하고 고쳐서 저장하세요.');
+    } catch (e) {
+      if (this.ai && this.ai.sid === id) { this.ai.busy = false; setMsg(''); const bt = $('aiGen'); if (bt) bt.disabled = false; }
+      toast(e.message || 'AI 초안을 만들지 못했습니다.');
+    }
+  },
+
   async copyText(text, msg, el) {
     try { await navigator.clipboard.writeText(text); toast(msg); }
     catch (e) { if (el) { el.focus(); el.select(); } toast('복사가 막혔습니다. 선택된 글을 Ctrl+C로 복사하세요.'); }
@@ -2067,6 +2149,7 @@ const Teacher = {
       area: $('aiArea') ? $('aiArea').value : '',
       subject: $('aiSubject') ? $('aiSubject').value.trim() : '',
       length_limit: $('aiLen') ? parseInt($('aiLen').value, 10) : 500,
+      ...(this.ai.row ? { evidence: this.ai.row.evidence || [], check_points: this.ai.row.check_points || [], ai_text: this.ai.row.ai_text || '' } : {}),
       ...patch,
       updated_at: new Date().toISOString(),
       updated_by: this.email
@@ -2151,6 +2234,176 @@ const Teacher = {
       toast(e.message || '요약 자료를 만들지 못했습니다.');
     }
   },
+
+  /* ===== AI 활동 요약 ===== */
+  aiSum: [], aiBatches: [], aiOK: true,
+  aiRow(sid, part) { return this.aiSum.find(r => r.student_id === sid && r.part === part) || null; },
+  aiApplies(s, part) { return part === 'overall' || part !== 'extra' || !!s.extra_required; },
+  /* 일괄 생성 대상: 파일을 냈고 아직 요약이 없거나 실패한 학생 (전체 요약은 파트 요약이 끝난 학생) */
+  aiEligible(part, list) {
+    return list.filter(s => {
+      if (!this.aiApplies(s, part)) return false;
+      const r = this.aiRow(s.id, part);
+      if (r && (r.status === 'done' || r.status === 'queued' || (r.status === 'skipped' && part !== 'overall'))) return false;
+      if (part === 'overall') {
+        const rows = AI_PARTS.filter(p => p.key !== 'overall' && this.aiApplies(s, p.key)).map(p => this.aiRow(s.id, p.key));
+        return rows.some(x => x && x.status === 'done') && !rows.some(x => x && x.status === 'queued');
+      }
+      return !!s[part].file_path;
+    });
+  },
+  openAiSum() {
+    this.openModal('mAiSum');
+    $('aiMsgAll').textContent = '';
+    this.renderAiSum();
+    if (this.aiBatches.length) this.checkAiBatches(false);
+  },
+  renderAiSum() {
+    const list = this.scopeList();
+    $('aiScope').textContent = `대상: ${this.scopeLabel().replace(/<[^>]+>/g, '')} ${list.length}명`;
+    if (!this.aiOK) { $('aiRows').innerHTML = '<tr><td colspan="7"><span class="warn">이 기능을 쓰려면 Supabase에서 update-ai-summary.sql 을 먼저 실행하세요.</span></td></tr>'; return; }
+    $('aiRows').innerHTML = AI_PARTS.map(p => {
+      const ap = list.filter(s => this.aiApplies(s, p.key));
+      const sub = p.key === 'overall' ? ap.length : ap.filter(s => s[p.key].file_path).length;
+      const rows = ap.map(s => this.aiRow(s.id, p.key)).filter(Boolean);
+      const done = rows.filter(r => r.status === 'done').length, queued = rows.filter(r => r.status === 'queued').length;
+      const bad = rows.filter(r => r.status === 'failed' || r.status === 'skipped').length;
+      const elig = this.aiEligible(p.key, list).length;
+      return `<tr class="${p.key === 'overall' ? 'ai-overall-row' : ''}"><th scope="row">${p.label}</th><td><span class="mdl ${p.model.toLowerCase()}">${p.model}</span></td>
+        <td>${sub}</td><td>${done}</td><td>${queued ? `<span class="ts-wait">${queued}</span>` : 0}</td><td>${bad ? `<span class="ts-late">${bad}</span>` : 0}</td>
+        <td><button class="btn sm ${elig ? 'primary' : ''}" data-aibatch="${p.key}" ${elig ? '' : 'disabled'}>일괄 생성${elig ? ` (${elig}명)` : ''}</button></td></tr>`;
+    }).join('');
+    $('aiRows').querySelectorAll('[data-aibatch]').forEach(b => b.onclick = () => this.runAiBatch(b.dataset.aibatch, b));
+    $('aiBatchBox').innerHTML = this.aiBatches.length
+      ? `<h3 class="rv-h">진행 중인 일괄 생성 ${this.aiBatches.length}건</h3><ul class="ai-blist">${this.aiBatches.map(b => `<li><span class="mdl">${(AI_PARTS.find(p => p.key === b.part) || {}).label || b.part}</span> ${b.request_count}명 · ${fmtDT(b.created_at)} 보냄</li>`).join('')}</ul>`
+      : '';
+  },
+  async runAiBatch(part, btn) {
+    const ids = this.aiEligible(part, this.scopeList()).map(s => s.id);
+    if (!ids.length) return;
+    if (!btn.classList.contains('armed')) {
+      btn.classList.add('armed'); btn.textContent = `${ids.length}명 요약 시작? 한 번 더`;
+      setTimeout(() => { if (btn.isConnected && btn.classList.contains('armed')) this.renderAiSum(); }, 4000);
+      return;
+    }
+    btn.classList.remove('armed');
+    btn.disabled = true;
+    const size = part === 'overall' ? 20 : 5;
+    let sent = 0;
+    const skipped = [];
+    try {
+      for (let i = 0; i < ids.length; i += size) {
+        $('aiMsgAll').textContent = `자료를 준비해서 보내는 중 ${Math.min(i + size, ids.length)} / ${ids.length}명`;
+        const out = await apiPost('/api/ai-batch', { part, student_ids: ids.slice(i, i + size) });
+        sent += out.sent || 0;
+        (out.skipped || []).forEach(x => skipped.push(x));
+      }
+      await this.reloadAi();
+      $('aiMsgAll').textContent = `${sent}명을 보냈어요.${skipped.length ? ` 제외 ${skipped.length}명 (형식 제외·파일 없음 등)` : ''} 결과는 보통 1시간 안에 나와요.`;
+      toast(`${(AI_PARTS.find(p => p.key === part) || {}).label} 일괄 생성을 시작했어요.`);
+    } catch (e) {
+      $('aiMsgAll').textContent = e.message;
+      toast(e.message);
+      await this.reloadAi();
+    }
+    this.renderAiSum();
+  },
+  async reloadAi() {
+    const [as, ab] = await Promise.all([
+      sb.from('ai_summaries').select('id,student_id,part,status,model,summary,error,source_path,source_name,gen_count,updated_at,batch_id'),
+      sb.from('ai_batches').select('*').eq('status', 'in_progress').order('created_at', { ascending: true })
+    ]);
+    if (!as.error) this.aiSum = as.data || [];
+    if (!ab.error) this.aiBatches = ab.data || [];
+  },
+  async checkAiBatches(manual) {
+    try {
+      if (manual) $('aiMsgAll').textContent = '결과를 확인하는 중이에요.';
+      const out = await apiPost('/api/ai-status', {});
+      await this.reloadAi();
+      const msg = out.saved || out.failed
+        ? `새 결과 ${out.saved}건 저장${out.failed ? `, 실패 ${out.failed}건` : ''}`
+        : out.pending && out.pending.length ? `아직 진행 중 ${out.pending.length}건. 조금 뒤 다시 확인하세요.` : '진행 중인 일괄 생성이 없어요.';
+      if (manual || out.saved) toast(msg);
+      if ($('mAiSum').classList.contains('on')) { $('aiMsgAll').textContent = msg; this.renderAiSum(); }
+      if (out.saved && this.openId) this.refreshAiBoxes();
+    } catch (e) {
+      if (manual) { $('aiMsgAll').textContent = e.message; toast(e.message); }
+    }
+  },
+  refreshAiBoxes() {
+    const bx = $('aiSumBox'); if (bx) { bx.outerHTML = this.aiSumHTML(); this.bindAiSum(); }
+    const ai = $('aiBox'); if (ai) { const keep = $('aiDraft') ? $('aiDraft').value : null; ai.outerHTML = this.aiHTML(); this.bindAI(); if (keep !== null && $('aiDraft') && !$('aiDraft').value) $('aiDraft').value = keep; }
+  },
+
+  /* 학생 페이지: AI 활동 요약 */
+  aiSumHTML() {
+    const s = this.students.get(this.openId);
+    if (!s) return '';
+    if (!this.aiOK) return `<section class="card ai-sum" id="aiSumBox"><h3>AI 활동 요약</h3><p class="hint">이 기능을 쓰려면 Supabase에서 update-ai-summary.sql 을 먼저 실행하세요.</p></section>`;
+    const btns = (part, r) => {
+      if (r && r.status === 'queued') return '<span class="hint">일괄 생성 진행 중…</span>';
+      const used = r ? r.gen_count || 0 : 0;
+      if (!r || r.status !== 'done') return `<button class="btn sm primary" data-ainow="${part}">지금 요약</button>`;
+      return used < AI_MAX_GEN ? `<button class="btn sm" data-ainow="${part}">다시 요약 (${Math.max(0, used - 1)}/3)</button>` : '<span class="hint">다시 요약 3/3 사용</span>';
+    };
+    const meta = (r, cur) => r && r.status === 'done'
+      ? `<span class="hint">${fmtDT(r.updated_at)} · ${String(r.model).includes('haiku') ? 'Haiku' : 'Sonnet'}${r.source_name ? ` · ${esc(r.source_name)}` : ''}</span>${cur && r.source_path && cur !== r.source_path ? ' <span class="tag rev">요약 이후 새 제출 있음</span>' : ''}`
+      : r && (r.status === 'failed' || r.status === 'skipped') ? `<span class="hint warn">${esc(r.error || '요약하지 못함')}</span>` : '';
+    const field = (label, v) => v && (Array.isArray(v) ? v.length : String(v).trim()) ? `<div class="ais-f"><b>${label}</b>${Array.isArray(v) ? `<ul>${v.map(x => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>` : `<p>${esc(v)}</p>`}</div>` : '';
+    const ov = this.aiRow(s.id, 'overall');
+    let ovBody = '<p class="hint">파트 요약이 끝나면 전체 요약을 만들 수 있어요. (AI 요약 창에서 일괄 생성, 또는 여기서 지금 요약)</p>';
+    if (ov && ov.status === 'done' && ov.summary) {
+      const o = ov.summary;
+      const comp = o.career && Array.isArray(o.career.competencies) ? o.career.competencies : [];
+      ovBody = `${field('활동 흐름', o.flow)}
+        ${Array.isArray(o.revisions) && o.revisions.length ? `<div class="ais-f"><b>피드백 → 수정 과정</b><div class="ais-tw"><table class="ais-t"><thead><tr><th>파트</th><th>선생님 피드백</th><th>학생 수정</th></tr></thead><tbody>${o.revisions.map(x => `<tr><td>${esc(x.part || '')}</td><td>${esc(x.feedback || '')}</td><td>${esc(x.change || '')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+        ${comp.length ? `<div class="ais-f"><b>희망 진로${o.career.goal ? ` (${esc(o.career.goal)})` : ''}에 필요한 역량과 활동</b><div class="ais-tw"><table class="ais-t"><thead><tr><th>역량</th><th>필요한 이유</th><th>보여 준 활동·근거</th></tr></thead><tbody>${comp.map(x => `<tr><td><b>${esc(x.name || '')}</b></td><td>${esc(x.why || '')}</td><td>${esc(x.evidence || '')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+        ${field('생기부 참고 포인트', o.points)}${field('확인할 점', o.check)}`;
+    }
+    const parts = AI_PARTS.filter(p => p.key !== 'overall' && this.aiApplies(s, p.key)).map(p => {
+      const r = this.aiRow(s.id, p.key);
+      const cur = s[p.key].file_path;
+      const st = !cur ? '<span class="pill none">미제출</span>' : !r ? '<span class="pill none">요약 없음</span>'
+        : r.status === 'done' ? '<span class="pill done">요약 완료</span>' : r.status === 'queued' ? '<span class="pill waiting">진행 중</span>'
+        : `<span class="pill revise">${r.status === 'skipped' ? '제외' : '실패'}</span>`;
+      const sm = r && r.status === 'done' && r.summary ? r.summary : null;
+      return `<details class="ais-part"><summary><span class="ais-pl">${p.label}</span>${st}<span class="mdl ${p.model.toLowerCase()}">${p.model}</span></summary>
+        <div class="ais-pbody">${meta(r, cur)}
+          ${sm ? `${field('요약', sm.summary)}${field('탐구 질문', sm.question)}${field('동기·목적', sm.motivation)}${field('방법·과정', sm.method)}${field('결과·결론', sm.result)}${field('일정', sm.schedule)}${field('활용 자료', sm.materials)}${field('그림', sm.figures)}${field('피드백 반영', sm.revision)}${field('확인할 점', sm.notes)}` : ''}
+          ${cur ? `<div class="ai-actions">${btns(p.key, r)}</div>` : ''}</div></details>`;
+    }).join('');
+    return `<section class="card ai-sum" id="aiSumBox">
+      <h3>AI 활동 요약 <span class="ai-tag">선생님만</span></h3>
+      <div class="ais-overall"><div class="ais-oh"><b>전체 요약</b> ${meta(ov, null)}<span class="spacer"></span>${btns('overall', ov)}</div>${ovBody}</div>
+      <div class="ais-parts">${parts}</div>
+      <p class="hint ai-msg" id="aiSumMsg"></p>
+    </section>`;
+  },
+  bindAiSum() {
+    const box = $('aiSumBox');
+    if (!box) return;
+    box.querySelectorAll('[data-ainow]').forEach(b => b.onclick = async () => {
+      const part = b.dataset.ainow;
+      const r = this.aiRow(this.openId, part);
+      if (r && r.status === 'done' && !b.classList.contains('armed')) {
+        b.classList.add('armed'); b.textContent = `다시 요약할까요? 남은 횟수 ${AI_MAX_GEN - r.gen_count}`;
+        setTimeout(() => { if (b.isConnected && b.classList.contains('armed')) { b.classList.remove('armed'); b.textContent = `다시 요약 (${Math.max(0, r.gen_count - 1)}/3)`; } }, 4000);
+        return;
+      }
+      b.disabled = true;
+      const id = this.openId;
+      $('aiSumMsg').textContent = `${(AI_PARTS.find(p => p.key === part) || {}).label} 요약 중이에요. 30초~1분 걸려요.`;
+      try {
+        const out = await apiPost('/api/ai-now', { student_id: id, part });
+        const i = this.aiSum.findIndex(x => x.student_id === id && x.part === part);
+        if (i >= 0) this.aiSum[i] = { ...this.aiSum[i], ...out.row }; else this.aiSum.push(out.row);
+        toast('요약했어요.');
+      } catch (e) { toast(e.message); await this.reloadAi(); }
+      if (this.openId === id) this.refreshAiBoxes();
+    });
+  },
+
 
   /* ----- 마감 지난 학생에게 알림 ----- */
   async sendOverdue(ids, btn) {
