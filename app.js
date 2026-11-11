@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-13b';
+const APP_VERSION = '2026-11-14';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -133,7 +133,7 @@ const STAGES = [
 const OUTPUT = STAGES.find(g => g.key === 'output');
 const PLAN = STAGES.find(g => g.key === 'plan');
 /* 메일 알림용 앱스 스크립트 코드 (비밀값은 설정 창에서 채움) */
-const APPS_SCRIPT_CODE = "/**\n * 개인연구 사이트 · 학생 메일 알림\n * - 사이트(Supabase)가 보낸 신호를 받아 학생 학교 메일로 알림을 보냅니다.\n * - 메일에는 피드백 내용을 넣지 않고, 사이트에서 확인하라는 알림과 링크만 보냅니다.\n * - 같은 학생의 같은 항목은 10분 안에 한 번만 보냅니다.\n */\nconst SECRET = '__SECRET__';   // 사이트의 '메일 알림' 설정 창에 보이는 비밀값과 같아야 합니다.\n\nfunction doPost(e) {\n  try {\n    const d = JSON.parse(e.postData.contents || '{}');\n    if (d.secret !== SECRET) return out_({ ok: false, error: 'secret' });\n    if (!d.to || d.to.indexOf('@') < 0) return out_({ ok: false, error: 'no email' });\n\n    const cache = CacheService.getScriptCache();\n    const key = 'n:' + d.to + ':' + (d.stage || '');\n    if (!d.test && cache.get(key)) return out_({ ok: true, skipped: 'recent' });\n    cache.put(key, '1', 600);\n\n    const what = d.kind === 'memo' ? '내 글에 본문 메모를 남겼어요'\n      : d.status === 'revise' ? '보완 요청을 보냈어요'\n      : d.status === 'done' ? '확인을 마쳤어요'\n      : d.kind === 'test' ? '테스트 메일이에요'\n      : '피드백을 남겼어요';\n    const teacher = (d.teacher || '담당') + ' 선생님';\n    const subject = '[개인연구] ' + (d.stageLabel || '') + ' · ' + teacher + '이 ' + what;\n    const site = d.site || '';\n    const html =\n      '<div style=\"font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;font-size:15px;line-height:1.7;color:#17213A\">' +\n      '<p>' + esc_(d.name || '') + ' 학생, 안녕하세요.</p>' +\n      '<p><b>' + esc_(d.stageLabel || '') + '</b>에 ' + esc_(teacher) + '이 ' + esc_(what) + '</p>' +\n      '<p>내용은 개인연구 사이트에서 확인하세요.</p>' +\n      (site ? '<p><a href=\"' + esc_(site) + '\" style=\"display:inline-block;padding:10px 18px;background:#17213A;color:#fff;border-radius:8px;text-decoration:none\">사이트에서 확인하기</a></p>' : '') +\n      '<p style=\"color:#7A849A;font-size:12px\">이 메일은 자동으로 보내졌어요. 답장하지 말고 사이트에서 확인해 주세요.</p></div>';\n\n    MailApp.sendEmail({ to: d.to, subject: subject, htmlBody: html, name: '개인연구 알림' });\n    return out_({ ok: true });\n  } catch (err) {\n    return out_({ ok: false, error: String(err) });\n  }\n}\n\n/* 처음 한 번 실행해서 '메일 보내기' 권한을 허용하세요. */\nfunction authorize() {\n  Logger.log('오늘 보낼 수 있는 메일 수: ' + MailApp.getRemainingDailyQuota());\n}\n\nfunction out_(o) {\n  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);\n}\nfunction esc_(s) {\n  return String(s).replace(/[&<>\"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]; });\n}\n";
+const APPS_SCRIPT_CODE = "/**\n * 개인연구 사이트 · 학생 메일 알림\n * - 사이트(Supabase)가 보낸 신호를 받아 학생 학교 메일로 알림을 보냅니다.\n * - 메일에는 피드백 내용을 넣지 않고, 사이트에서 확인하라는 알림과 링크만 보냅니다.\n * - 같은 학생의 같은 항목은 10분 안에 한 번만 보냅니다.\n */\nconst SECRET = '__SECRET__';   // 사이트의 '메일 알림' 설정 창에 보이는 비밀값과 같아야 합니다.\n\nfunction doPost(e) {\n  try {\n    const d = JSON.parse(e.postData.contents || '{}');\n    if (d.secret !== SECRET) return out_({ ok: false, error: 'secret' });\n    if (!d.to || d.to.indexOf('@') < 0) return out_({ ok: false, error: 'no email' });\n\n    const cache = CacheService.getScriptCache();\n    const key = (d.kind === 'overdue' ? 'o:' : 'n:') + d.to + ':' + (d.stage || '');\n    if (!d.test && cache.get(key)) return out_({ ok: true, skipped: 'recent' });\n    cache.put(key, '1', d.kind === 'overdue' ? 21600 : 600);\n\n    if (d.kind === 'overdue') {\n      const t = (d.teacher || '담당') + ' 선생님';\n      const subj = '[개인연구] 제출 기한이 지났어요 · ' + (d.stageLabel || '');\n      const body =\n        '<div style=\"font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;font-size:15px;line-height:1.7;color:#17213A\">' +\n        '<p>' + esc_(d.name || '') + ' 학생, 안녕하세요.</p>' +\n        '<p><b>' + esc_(d.stageLabel || '') + '</b>의 제출 기한이 지났는데 아직 제출하지 않았어요.</p>' +\n        '<p>지금이라도 사이트에 올리고, 늦어진 이유가 있다면 ' + esc_(t) + '께 말씀드리세요.</p>' +\n        (d.site ? '<p><a href=\"' + esc_(d.site) + '\" style=\"display:inline-block;padding:10px 18px;background:#C02F29;color:#fff;border-radius:8px;text-decoration:none\">지금 제출하러 가기</a></p>' : '') +\n        '<p style=\"color:#7A849A;font-size:12px\">이미 제출했다면 이 메일은 무시해도 돼요. 이 메일은 자동으로 보내졌어요.</p></div>';\n      MailApp.sendEmail({ to: d.to, subject: subj, htmlBody: body, name: '개인연구 알림' });\n      return out_({ ok: true });\n    }\n\n    const what = d.kind === 'memo' ? '내 글에 본문 메모를 남겼어요'\n      : d.status === 'revise' ? '보완 요청을 보냈어요'\n      : d.status === 'done' ? '확인을 마쳤어요'\n      : d.kind === 'test' ? '테스트 메일이에요'\n      : '피드백을 남겼어요';\n    const teacher = (d.teacher || '담당') + ' 선생님';\n    const subject = '[개인연구] ' + (d.stageLabel || '') + ' · ' + teacher + '이 ' + what;\n    const site = d.site || '';\n    const html =\n      '<div style=\"font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;font-size:15px;line-height:1.7;color:#17213A\">' +\n      '<p>' + esc_(d.name || '') + ' 학생, 안녕하세요.</p>' +\n      '<p><b>' + esc_(d.stageLabel || '') + '</b>에 ' + esc_(teacher) + '이 ' + esc_(what) + '</p>' +\n      '<p>내용은 개인연구 사이트에서 확인하세요.</p>' +\n      (site ? '<p><a href=\"' + esc_(site) + '\" style=\"display:inline-block;padding:10px 18px;background:#17213A;color:#fff;border-radius:8px;text-decoration:none\">사이트에서 확인하기</a></p>' : '') +\n      '<p style=\"color:#7A849A;font-size:12px\">이 메일은 자동으로 보내졌어요. 답장하지 말고 사이트에서 확인해 주세요.</p></div>';\n\n    MailApp.sendEmail({ to: d.to, subject: subject, htmlBody: html, name: '개인연구 알림' });\n    return out_({ ok: true });\n  } catch (err) {\n    return out_({ ok: false, error: String(err) });\n  }\n}\n\n/* 처음 한 번 실행해서 '메일 보내기' 권한을 허용하세요. */\nfunction authorize() {\n  Logger.log('오늘 보낼 수 있는 메일 수: ' + MailApp.getRemainingDailyQuota());\n}\n\nfunction out_(o) {\n  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);\n}\nfunction esc_(s) {\n  return String(s).replace(/[&<>\"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]; });\n}\n";
 /* 양식을 보여 줄 위치 */
 const TPL_PLACES = [
   ['all', '모든 학생 공통 (학생 화면 맨 위)'], ['plan', '연구계획서'], ['report', '최종보고서'],
@@ -558,6 +558,9 @@ const Teacher = {
     const [st, sub, ev, notes, set, tpls] = res.map(r => r.data);
     this.settings = set || {};
     this.templates = tpls || [];
+    const od = await sb.from('overdue_notices').select('*').order('sent_at', { ascending: false });
+    this.overdueLog = od.error ? [] : (od.data || []);
+    this.overdueOK = !od.error;
     const mm = await sb.from('doc_memos').select('*').order('created_at', { ascending: true });
     this.memoOK = !mm.error;
     this.memos = mm.error ? [] : (mm.data || []);
@@ -746,6 +749,17 @@ const Teacher = {
       <div class="field"><label class="l" for="nfSite">메일에 넣을 사이트 주소</label><input class="in" id="nfSite"></div>
       <label class="agree small"><input type="checkbox" id="nfOn"> <span>메일 알림 켜기</span></label>
       <div class="tpl-pick"><button class="btn primary" id="nfSave">설정 저장</button><span class="hint" id="nfMsg"></span></div>
+      <h3 class="rv-h" style="margin-top:16px">마감 지난 학생 자동 알림</h3>
+      <p class="hint">매일 오전 8시에, 마감이 지났는데 아직 내지 않은 학생에게 알림 메일을 보냅니다. 밀린 항목은 한 통으로 모아 보냅니다.</p>
+      <div class="tpl-pick">
+        <label class="agree small" style="margin:0"><input type="checkbox" id="nfOverdue"> <span>자동으로 보내기</span></label>
+        <select class="in" id="nfRepeat" style="flex:0 1 240px">
+          <option value="0">마감 다음 날 한 번만</option>
+          <option value="3">3일마다 다시 (최대 3번)</option>
+          <option value="7">일주일마다 다시 (최대 3번)</option>
+        </select>
+      </div>
+      <p class="notice" style="margin-top:10px">이 기능을 처음 켤 때는 앱스 스크립트 코드를 다시 복사해서 붙여넣고, <b>배포 → 배포 관리 → ✏️ 수정 → 버전: 새 버전 → 배포</b>로 다시 배포해 주세요. 웹 앱 URL은 그대로예요.</p>
       <h3 class="rv-h" style="margin-top:16px">테스트</h3>
       <div class="tpl-pick"><input class="in" id="nfTo" type="email" style="flex:1;min-width:200px"><button class="btn" id="nfTest">테스트 메일 보내기</button></div>
       <p class="hint" id="nfTestMsg"></p>
@@ -970,6 +984,7 @@ const Teacher = {
       ${this.isAdmin && allStudents.some(s => !s.teacher_email) ? `<button class="todo mail" data-tf="__none"><span>담당 교사 미배정</span><span class="n">${allStudents.filter(s => !s.teacher_email).length}</span></button>` : ''}
       ${noconsent ? `<button class="todo mail" data-f="noconsent"><span>개인정보 동의 전</span><span class="n">${noconsent}</span></button>` : ''}
       ${wait ? `<button class="btn primary" id="rvStart">대기 중인 제출물 차례로 검토하기</button>` : ''}
+      ${late ? `<button class="btn" id="lateMail">📧 마감 지난 학생 ${late}명에게 알림 메일</button>` : ''}
     </div></div>`;
     $('summary').innerHTML = html;
     $('summary').querySelectorAll('.todo').forEach(b => b.onclick = () => {
@@ -980,6 +995,12 @@ const Teacher = {
     });
     const rs = $('rvStart');
     if (rs) rs.onclick = () => this.openReview(this.waitingQueue(), 0);
+    const lm = $('lateMail');
+    if (lm) lm.onclick = () => {
+      if (!lm.classList.contains('armed')) { lm.classList.add('armed'); lm.textContent = '정말 보낼까요? 한 번 더 누르세요'; setTimeout(() => { if (lm.isConnected) { lm.classList.remove('armed'); lm.textContent = `📧 마감 지난 학생 ${late}명에게 알림 메일`; } }, 4000); return; }
+      const ids = list.filter(s => stagesFor(s).some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)))).map(s => s.id);
+      this.sendOverdue(ids, lm);
+    };
     this.renderTeacherStats();
   },
 
@@ -1324,6 +1345,14 @@ const Teacher = {
         </div>
         <p class="d-topic">${d.topic ? esc(d.topic) : '<span class="hint">연구 주제 미정</span>'}</p>
         <p class="d-career">🎯 진로 희망 · ${d.career ? `<b>${esc(d.career)}</b>` : '<span class="hint">아직 적지 않음</span>'}</p>
+        ${(() => {
+          const lateG = gs.filter(g => this.orig[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)));
+          if (!lateG.length) return '';
+          const last = (this.overdueLog || []).find(n => n.student_id === d.id);
+          return `<div class="d-late"><span class="tag late">마감 지남: ${lateG.map(g => g.label).join(', ')}</span>
+            <button class="btn sm" id="dLateMail" ${d.email ? '' : 'disabled title="학생 이메일이 없어요"'}>📧 마감 알림 메일 보내기</button>
+            <span class="hint">${last ? `마지막 알림 ${fmtDT(last.sent_at)}${last.sent_by === 'auto' ? ' (자동)' : ''}` : '아직 알림을 보내지 않았어요'}</span></div>`;
+        })()}
         ${this.stepperHTML(d)}
       </section>
       ${this.feedbackNowHTML(fnow)}
@@ -1340,6 +1369,8 @@ const Teacher = {
         </section>
       </div>
       ${this.aiHTML()}`;
+      const dlm = $('dLateMail');
+      if (dlm) dlm.onclick = () => this.sendOverdue([d.id], dlm);
       $('dBody').querySelectorAll('[data-go-fnow]').forEach(b => b.onclick = () => {
         const box = $('fnowBox');
         if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'start' }); box.classList.add('flash'); setTimeout(() => box.classList.remove('flash'), 1200); }
@@ -2121,6 +2152,20 @@ const Teacher = {
     }
   },
 
+  /* ----- 마감 지난 학생에게 알림 ----- */
+  async sendOverdue(ids, btn) {
+    if (!ids.length) { toast('보낼 학생이 없습니다.'); return; }
+    if (btn) btn.disabled = true;
+    const { data, error } = await sb.rpc('send_overdue_notices', { p_ids: ids });
+    if (btn) btn.disabled = false;
+    if (error) { toast(/send_overdue_notices|function/i.test(error.message || '') ? '이 기능을 쓰려면 Supabase에서 update-overdue.sql 을 먼저 실행하세요.' : (error.message || '알림을 보내지 못했습니다.')); return; }
+    toast(data ? `마감 지난 학생 ${data}명에게 알림 메일을 보냈습니다.` : '보낼 학생이 없습니다. (이메일이 없거나 이미 제출했어요)');
+    const od = await sb.from('overdue_notices').select('*').order('sent_at', { ascending: false });
+    if (!od.error) this.overdueLog = od.data || [];
+    if (this.openId && $('drawer').classList.contains('on') && !this.dirty) this.renderDrawer();
+    else this.renderSummary();
+  },
+
   /* ----- 메일 알림 ----- */
   nf: null,
   async openNotify() {
@@ -2136,12 +2181,15 @@ const Teacher = {
     $('nfUrl').value = row.webhook_url || '';
     $('nfSite').value = row.site_url || (/^https?:/.test(location.origin) ? location.origin + location.pathname : '');
     $('nfOn').checked = !!row.enabled;
+    $('nfOverdue').checked = !!row.overdue_auto;
+    $('nfRepeat').value = String(row.overdue_repeat_days || 0);
     $('nfTo').value = this.email;
   },
   async saveNotify() {
     const url = $('nfUrl').value.trim();
     if (url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) { toast('웹 앱 URL은 https://script.google.com/macros/s/…/exec 형식이어야 합니다.'); $('nfUrl').focus(); return; }
-    const row = { webhook_url: url, site_url: $('nfSite').value.trim(), enabled: $('nfOn').checked && !!url, secret: this.nf.secret, updated_at: new Date().toISOString() };
+    const row = { webhook_url: url, site_url: $('nfSite').value.trim(), enabled: $('nfOn').checked && !!url, secret: this.nf.secret, updated_at: new Date().toISOString(),
+      overdue_auto: $('nfOverdue').checked, overdue_repeat_days: parseInt($('nfRepeat').value, 10) || 0 };
     const { error } = await sb.from('notify_settings').update(row).eq('id', 1);
     if (error) { toast(dbMsg(error)); return; }
     this.nf.saved = true;

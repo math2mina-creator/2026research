@@ -606,3 +606,7 @@ mark.memo-hl.on{background:#ffcf33;box-shadow:0 0 0 3px rgba(240,180,0,.35)}
 .now-box.teacher.old .now-name{background:var(--stamp)}
 .d-grid.one{grid-template-columns:minmax(0,1fr)}
 .card.moved h3{margin:0;font-size:17px}
+.d-late{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-6px 0 14px}
+.d-late .tag{margin:0}
+.d-late .hint{margin:0}
+#lateMail.armed{background:var(--stamp);color:#fff;border-color:var(--stamp)}
