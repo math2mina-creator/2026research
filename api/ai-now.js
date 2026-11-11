@@ -3157,7 +3157,7 @@ var Inflate_1$1 = Inflate$1, inflate_2 = inflate$1, inflateRaw_1$1 = inflateRaw$
   ungzip: ungzip$1,
   constants
 }, { Deflate, deflate, deflateRaw, gzip } = deflate_1$1, { Inflate, inflate, inflateRaw, ungzip } = inflate_1$1;
-var inflate_1 = inflate, inflateRaw_1 = inflateRaw;
+var Inflate_1 = Inflate;
 
 // ../../../mnt/user-data/outputs/research-site/server-src/lib.js
 var PARTS = ["plan", "intro", "body", "conclusion", "output", "extra"], LABEL = {
@@ -3320,24 +3320,135 @@ function extractHwpx(u82, withImages) {
   }
   return { text, images, skippedImages };
 }
+function oleLenient(u82) {
+  let dv = new DataView(u82.buffer, u82.byteOffset, u82.byteLength), u32 = (o) => o + 4 <= u82.length ? dv.getUint32(o, !0) : 4294967295, ss = 1 << dv.getUint16(30, !0), mss = 1 << dv.getUint16(32, !0), cutoff = u32(56) || 4096, nSect = Math.floor((u82.length - ss) / ss) + 1, secOff = (n) => (n + 1) * ss, okSec = (n) => n < 4294967290 && secOff(n) < u82.length, fatSecs = [];
+  for (let i = 0; i < 109; i++) {
+    let s = u32(76 + i * 4);
+    okSec(s) && fatSecs.push(s);
+  }
+  let d = u32(68), guard = 0;
+  for (; okSec(d) && guard++ < 1e4; ) {
+    let base = secOff(d), per = ss / 4 - 1;
+    for (let i = 0; i < per; i++) {
+      let s = u32(base + i * 4);
+      okSec(s) && fatSecs.push(s);
+    }
+    d = u32(base + per * 4);
+  }
+  let fat = [];
+  for (let s of fatSecs) {
+    let base = secOff(s);
+    for (let i = 0; i < ss / 4; i++) fat.push(u32(base + i * 4));
+  }
+  let chain = (start, table) => {
+    let out = [], seen = /* @__PURE__ */ new Set();
+    for (let s = start; s < 4294967290 && !seen.has(s) && out.length < 1e6; s = table[s] === void 0 ? 4294967294 : table[s])
+      seen.add(s), out.push(s);
+    return out;
+  }, readChain = (start, size) => {
+    let parts = [], got = 0;
+    for (let s of chain(start, fat)) {
+      if (!okSec(s)) break;
+      let o = secOff(s), n = Math.min(ss, u82.length - o);
+      if (parts.push(u82.subarray(o, o + n)), got += n, size && got >= size) break;
+    }
+    let out = new Uint8Array(size ? Math.min(size, got) : got), p = 0;
+    for (let b of parts) {
+      let n = Math.min(b.length, out.length - p);
+      if (out.set(b.subarray(0, n), p), p += n, p >= out.length) break;
+    }
+    return out;
+  }, dir = readChain(u32(48), 0), dd = new DataView(dir.buffer, dir.byteOffset, dir.byteLength), entries = [];
+  for (let o = 0; o + 128 <= dir.length; o += 128) {
+    let nl = dd.getUint16(o + 64, !0), name = "";
+    for (let i = 0; i + 1 < Math.min(nl, 64) - 2 + 1 && i < 62; i += 2) {
+      let c = dd.getUint16(o + i, !0);
+      if (!c) break;
+      name += String.fromCharCode(c);
+    }
+    entries.push({ name, type: dir[o + 66], left: dd.getUint32(o + 68, !0), right: dd.getUint32(o + 72, !0), child: dd.getUint32(o + 76, !0), start: dd.getUint32(o + 116, !0), size: dd.getUint32(o + 120, !0) });
+  }
+  let root = entries[0] || { start: 4294967294, child: 4294967295 }, ministream = readChain(root.start, 0), minifat = [];
+  {
+    let mf = readChain(u32(60), 0), mdv = new DataView(mf.buffer, mf.byteOffset, mf.byteLength);
+    for (let i = 0; i + 4 <= mf.length; i += 4) minifat.push(mdv.getUint32(i, !0));
+  }
+  let readEntry = (e) => {
+    if (e.size < cutoff) {
+      let out = new Uint8Array(e.size), p = 0;
+      for (let s of chain(e.start, minifat)) {
+        let o = s * mss;
+        if (o >= ministream.length) break;
+        let n = Math.min(mss, e.size - p, ministream.length - o);
+        if (out.set(ministream.subarray(o, o + n), p), p += n, p >= e.size) break;
+      }
+      return out.subarray(0, p);
+    }
+    return readChain(e.start, e.size);
+  }, paths = {}, walk = (idx, prefix, depth) => {
+    if (idx === 4294967295 || idx >= entries.length || depth > 64) return;
+    let stack = [idx], seen = /* @__PURE__ */ new Set();
+    for (; stack.length; ) {
+      let i = stack.pop();
+      if (i === 4294967295 || i >= entries.length || seen.has(i)) continue;
+      seen.add(i);
+      let e = entries[i];
+      stack.push(e.left, e.right);
+      let p = prefix + "/" + e.name;
+      e.type === 2 ? paths[p] = e : e.type === 1 && walk(e.child, p, depth + 1);
+    }
+  };
+  return walk(root.child, "", 0), {
+    get: (n) => {
+      let key = n.startsWith("/") ? n : "/" + n, e = paths[key] || Object.entries(paths).find(([k]) => k.toLowerCase() === key.toLowerCase())?.[1];
+      return e ? readEntry(e) : null;
+    },
+    list: () => Object.keys(paths)
+  };
+}
+function inflatePartial(b) {
+  for (let raw of [!0, !1]) {
+    let parts = [], inf = new Inflate_1({ raw });
+    inf.onData = (c) => parts.push(c);
+    let ended = !1;
+    inf.onEnd = () => {
+      ended = !0;
+    };
+    try {
+      inf.push(b, !0);
+    } catch {
+    }
+    !ended && inf.strm && inf.strm.output && inf.strm.next_out > 0 && parts.push(inf.strm.output.subarray(0, inf.strm.next_out));
+    let n = parts.reduce((a, c) => a + c.length, 0);
+    if (n) {
+      let out = new Uint8Array(n), p = 0;
+      for (let c of parts)
+        out.set(c, p), p += c.length;
+      return out;
+    }
+  }
+  return new Uint8Array(0);
+}
+function openOle(u82) {
+  try {
+    let cfb = CFB.read(Buffer.from(u82), { type: "buffer" }), get = (n) => {
+      let e = CFB.find(cfb, n);
+      return e ? new Uint8Array(e.content) : null;
+    };
+    if (!get("/FileHeader") && !get("FileHeader")) throw new Error("no header");
+    return { get, list: () => cfb.FullPaths.map((p, i) => ({ p, e: cfb.FileIndex[i] })).filter((x) => x.e.type === 2).map((x) => x.p.replace(/^Root Entry/, "")), via: "cfb" };
+  } catch {
+    return { ...oleLenient(u82), via: "lenient" };
+  }
+}
 var SKIP_CTRL = /* @__PURE__ */ new Set(["head", "foot", "fn  ", "en  ", "tcmt", "memo"]);
 function extractHwp(u82, withImages) {
-  let cfb = CFB.read(Buffer.from(u82), { type: "buffer" }), get = (n) => {
-    let e = CFB.find(cfb, n);
-    return e ? new Uint8Array(e.content) : null;
-  }, fh = get("/FileHeader") || get("FileHeader");
+  let ole = openOle(u82), get = ole.get, fh = get("/FileHeader") || get("FileHeader");
   if (!fh) throw new Error("\uD55C\uAE00 \uD30C\uC77C \uBA38\uB9AC \uC815\uBCF4\uAC00 \uC5C6\uC74C");
   let prop = new DataView(fh.buffer, fh.byteOffset, fh.byteLength).getUint32(36, !0);
   if (prop & 2) throw new Error("\uC554\uD638\uAC00 \uAC78\uB9B0 \uBB38\uC11C");
   if (prop & 4) throw new Error("\uBC30\uD3EC\uC6A9 \uBB38\uC11C");
-  let compressed = !!(prop & 1), unz = (b) => {
-    if (!compressed) return b;
-    try {
-      return inflateRaw_1(b);
-    } catch {
-      return inflate_1(b);
-    }
-  }, out = [];
+  let compressed = !!(prop & 1), unz = (b) => compressed ? inflatePartial(b) : b, out = [];
   for (let i = 0; i < 200; i++) {
     let sec = get(`/BodyText/Section${i}`) || get(`BodyText/Section${i}`);
     if (!sec) break;
@@ -3378,12 +3489,16 @@ function extractHwp(u82, withImages) {
 `).replace(/\n{3,}/g, `
 
 `).trim(), images = [], skippedImages = 0;
-  return withImages && cfb.FileIndex.map((e, i) => ({ e, path: cfb.FullPaths[i] })).filter((x) => /\/BinData\/[^/]+$/i.test(x.path) && x.e.type === 2).sort((a, b) => a.path.localeCompare(b.path, void 0, { numeric: !0 })).forEach((x, idx) => {
+  return withImages && ole.list().filter((p) => /\/BinData\/[^/]+$/i.test(p)).sort((a, b) => a.localeCompare(b, void 0, { numeric: !0 })).forEach((path, idx) => {
     if (idx === 0) {
       skippedImages++;
       return;
     }
-    let ext = x.path.split(".").pop().toLowerCase(), type = IMAGE_TYPES[ext], data = new Uint8Array(x.e.content);
+    let ext = path.split(".").pop().toLowerCase(), type = IMAGE_TYPES[ext], data = ole.get(path);
+    if (!data) {
+      skippedImages++;
+      return;
+    }
     try {
       data = unz(data);
     } catch {
