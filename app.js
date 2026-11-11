@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-12c';
+const APP_VERSION = '2026-11-12d';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -2724,6 +2724,37 @@ const Student = {
     </section>`;
   },
 
+  /* 지금 낼 보고서: 보완 요청 → 순서상 처음 미제출 */
+  nowStage() {
+    const items = stagesFor(this.me);
+    const st = g => (this.subs[g.key] || {}).status || 'none';
+    const rev = items.find(g => st(g) === 'revise');
+    if (rev) return { g: rev, why: 'revise' };
+    const none = items.find(g => st(g) === 'none');
+    if (none) return { g: none, why: 'next' };
+    return null;
+  },
+  nowHTML(now) {
+    const items = stagesFor(this.me);
+    if (!now) {
+      const allDone = items.every(g => ((this.subs[g.key] || {}).status) === 'done');
+      return `<section class="now-box empty" id="nowBox"><h2>지금 제출할 보고서</h2>
+        <p>${allDone ? '모든 보고서가 확인 완료됐어요. 수고했어요!' : '지금 낼 보고서는 없어요. 선생님이 확인하고 있으니 피드백을 기다려 주세요.'}</p></section>`;
+    }
+    const g = now.g;
+    const due = dueFrom(this.settings, g.due);
+    const d = dday(due);
+    const why = now.why === 'revise'
+      ? '선생님이 <b>보완 요청</b>을 보냈어요. 피드백을 보고 고쳐서 다시 내 주세요.'
+      : `순서대로 이번에 낼 보고서예요.${due ? ` 마감은 <b>${fmtDate(due)}</b>${d !== null ? (d < 0 ? ' (마감이 지났어요)' : d === 0 ? ' (오늘)' : ` (D-${d})`) : ''}이에요.` : ''}`;
+    return `<section class="now-box ${now.why}" id="nowBox">
+      <h2>지금 제출할 보고서 <span class="now-name">${g.full}</span></h2>
+      <p class="now-why">${why}</p>
+      ${g.group === 'report' ? this.tplLinks('report') : ''}
+      <div class="cards one">${this.card(g)}</div>
+    </section>`;
+  },
+
   progressHTML() {
     const items = stagesFor(this.me);
     const rows = items.map(g => {
@@ -2859,6 +2890,13 @@ const Student = {
   },
 
   render() {
+    const me0 = this.me;
+    const now = this.nowStage();
+    /* 지금 낼 보고서는 위쪽 칸으로 옮기고, 원래 자리에는 안내만 남깁니다 */
+    const cardOrPh = g => (now && now.g.key === g.key)
+      ? `<section class="card moved"><div class="card-h"><h2>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.full}</h2></div>
+          <p class="hint">위쪽 <b>지금 제출할 보고서</b> 칸에서 제출하세요.</p><button class="btn sm" data-go-now>바로 가기 ↑</button></section>`
+      : this.card(g);
     const me = this.me;
     app.innerHTML = `${topBar(this.email)}
       <header class="top"><div>
@@ -2868,16 +2906,19 @@ const Student = {
       </div></header>
       ${this.annHTML()}
       ${this.progressHTML()}
+      ${this.nowHTML(now)}
       ${this.tplLinks('all', true)}
       <h2 class="group-title">연구계획서 <span>연구 주제, 연구 목적, 연구 방법과 일정을 담은 계획서를 한글 파일로 올리세요.</span></h2>
-      <div class="cards one">${this.card(PLAN)}</div>
+      <div class="cards one">${cardOrPh(PLAN)}</div>
       <h2 class="group-title">최종보고서 <span>세 부분을 각각 한글 파일로 올리세요. 부분마다 마감일이 다를 수 있어요.</span></h2>
       ${this.tplLinks('report', true)}
-      <div class="cards three">${PARTS.map(g => this.card(g)).join('')}</div>
+      <div class="cards three">${PARTS.map(cardOrPh).join('')}</div>
       ${me.extra_required ? `<h2 class="group-title">개인연구보고서 <span>실험 대상 학생은 개인연구보고서도 한글 파일로 제출하세요</span></h2>
-      <div class="cards one">${this.card(EXTRA)}</div>` : ''}
+      <div class="cards one">${cardOrPh(EXTRA)}</div>` : ''}
       <h2 class="group-title">산출물 <span>연구 과정에서 만든 결과물을 올리세요. 여러 파일이면 zip으로 묶어서 올리면 됩니다.</span></h2>
-      <div class="cards one">${this.card(OUTPUT)}</div>`;
+      <div class="cards one">${cardOrPh(OUTPUT)}</div>`;
+    const jumpNow = $('nowBox');
+    app.querySelectorAll('[data-go-now]').forEach(b => b.onclick = () => { if (jumpNow) { jumpNow.scrollIntoView({ behavior: 'smooth', block: 'start' }); jumpNow.classList.add('flash'); setTimeout(() => jumpNow.classList.remove('flash'), 1200); } });
     bindLogout();
     app.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
     this.bindTopic();

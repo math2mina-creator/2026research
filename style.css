@@ -577,3 +577,18 @@ mark.memo-hl.on{background:#ffcf33;box-shadow:0 0 0 3px rgba(240,180,0,.35)}
 .part-row,.part-row.plan-row{grid-template-columns:48px 1fr 44px}
 .part-row .pl{white-space:nowrap}
 .part-row.extra-row{grid-template-columns:96px 1fr 44px}
+
+/* 지금 제출할 보고서 */
+.now-box{margin-top:22px;background:var(--surface);border:2px solid var(--ink);border-radius:14px;padding:16px 18px}
+.now-box.revise{border-color:var(--amber)}
+.now-box.empty{border:1px dashed var(--line)}
+.now-box h2{font-family:"Gowun Batang",serif;font-size:20px;margin:0 0 4px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.now-name{font-family:"IBM Plex Sans KR",sans-serif;font-size:14px;font-weight:600;padding:2px 10px;border-radius:999px;background:var(--ink);color:var(--surface)}
+.now-box.revise .now-name{background:var(--amber);color:#fff}
+.now-why{margin:0 0 12px;color:var(--ink-2);font-size:14.5px}
+.now-box .cards{margin-top:8px}
+.now-box .card{border-color:var(--line)}
+.now-box.flash{box-shadow:0 0 0 4px var(--blue-bg)}
+.card.moved{background:var(--paper);border-style:dashed;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.card.moved .card-h h2{font-size:18px}
+.card.moved .hint{margin:0}
