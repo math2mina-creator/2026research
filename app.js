@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-16c';
+const APP_VERSION = '2026-11-17';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -678,6 +678,7 @@ const Teacher = {
         <option value="late">마감 지남 미제출</option>
         <option value="alldone">모두 확인 완료</option>
         <option value="nomail">이메일 미등록</option>
+        <option value="unseen">피드백 미확인</option>
         <option value="noconsent">개인정보 동의 전</option>
         <option value="extra">개인연구보고서 대상</option>
       </select>
@@ -687,7 +688,7 @@ const Teacher = {
     </div>
     <p class="count" id="count"></p>
     <div class="tablebox">
-      <table><thead><tr><th>학번·이름</th><th>연구 주제</th><th>진행 상황</th><th>할 일</th><th>최근 활동</th></tr></thead><tbody id="rows"></tbody></table>
+      <table><thead><tr><th>학번·이름</th><th>연구 주제</th><th>진행 상황</th><th>할 일</th><th>학생 확인</th><th>최근 활동</th></tr></thead><tbody id="rows"></tbody></table>
       <div id="empty"></div>
     </div>
     </div>
@@ -1048,6 +1049,7 @@ const Teacher = {
     const late = list.filter(s => stagesFor(s).some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)))).length;
     const nomail = list.filter(s => !s.email).length;
     const noconsent = list.filter(s => s.email && !hasConsent(s)).length;
+    const unseen = list.filter(s => this.hasUnseen(s)).length;
     html += `<div class="sum"><h2>지금 할 일</h2><div class="todo-list">
       <button class="todo wait" data-f="wait"><span>피드백을 기다리는 제출물</span><span class="n">${wait}</span></button>
       <button class="todo rev" data-f="revise"><span>보완 요청 후 재제출 대기</span><span class="n">${rev}</span></button>
@@ -1055,6 +1057,7 @@ const Teacher = {
       ${nomail ? `<button class="todo mail" data-f="nomail"><span>이메일 미등록 (로그인 불가)</span><span class="n">${nomail}</span></button>` : ''}
       ${this.isAdmin && this.teachers.some(t => !t.name) ? `<button class="todo mail" data-open-teachers="1"><span>이름이 없는 선생님 계정</span><span class="n">${this.teachers.filter(t => !t.name).length}</span></button>` : ''}
       ${this.isAdmin && allStudents.some(s => !s.teacher_email) ? `<button class="todo mail" data-tf="__none"><span>담당 교사 미배정</span><span class="n">${allStudents.filter(s => !s.teacher_email).length}</span></button>` : ''}
+      ${unseen ? `<button class="todo rev" data-f="unseen"><span>피드백을 아직 안 읽은 학생</span><span class="n">${unseen}</span></button>` : ''}
       ${noconsent ? `<button class="todo mail" data-f="noconsent"><span>개인정보 동의 전</span><span class="n">${noconsent}</span></button>` : ''}
       ${wait ? `<button class="btn primary" id="rvStart">대기 중인 제출물 차례로 검토하기</button>` : ''}
       ${late ? `<button class="btn" id="lateMail">📧 마감 지난 학생 ${late}명에게 알림 메일</button>` : ''}
@@ -1130,6 +1133,7 @@ const Teacher = {
     if (f === 'revise') return stagesFor(s).some(g => s[g.key].status === 'revise');
     if (f === 'extra') return !!s.extra_required;
     if (f === 'output-none') return s.output.status === 'none';
+    if (f === 'unseen') return this.hasUnseen(s);
     if (f === 'plan-none') return s.plan.status === 'none';
     if (f === 'report-none') return PARTS.some(g => s[g.key].status === 'none');
     if (f === 'late') return stagesFor(s).some(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due)));
@@ -1151,6 +1155,31 @@ const Teacher = {
     return `<div class="ministeps">${steps}</div><div class="pcount">확인 완료 <b>${done}</b>/${gs.length}</div>`;
   },
   /* 목록: 선생님이 할 일 */
+  /* 학생이 선생님 피드백·본문 메모를 읽었는지 */
+  feedbackItems(s) {
+    const items = [];
+    stagesFor(s).forEach(g => (s.ev[g.key] || []).forEach(e => { if (e.kind === 'feedback') items.push({ at: e.created_at, seen: e.seen_at, where: g.label + ' 피드백' }); }));
+    (this.memos || []).filter(m => m.student_id === s.id).forEach(m => {
+      const g = STAGES.find(x => x.key === m.stage);
+      items.push({ at: m.created_at, seen: m.seen_at, where: (g ? g.label : m.stage) + ' 본문 메모' });
+    });
+    return items;
+  },
+  hasUnseen(s) { return this.feedbackItems(s).some(x => !x.seen); },
+  seenCell(s) {
+    const items = this.feedbackItems(s);
+    if (!items.length) return '<span class="hint" title="아직 남긴 피드백이 없어요">—</span>';
+    const unread = items.filter(x => !x.seen);
+    if (!unread.length) {
+      const last = items.map(x => x.seen).sort().pop();
+      return `<span class="seen-ok" title="피드백 ${items.length}개를 모두 읽었어요">✓ 확인</span><div class="pcount">${rel(last)} 읽음</div>`;
+    }
+    const oldest = unread.map(x => x.at).sort()[0];
+    const days = Math.max(0, Math.floor((Date.now() - new Date(oldest)) / 86400000));
+    const where = [...new Set(unread.map(x => x.where))].join(', ');
+    return `<span class="tag ${days >= 3 ? 'late' : 'rev'}" title="안 읽음: ${esc(where)}">미확인 ${unread.length}</span><div class="pcount">${days ? days + '일째' : '오늘'} 안 읽음</div>`;
+  },
+
   todoCell(s) {
     const gs = stagesFor(s);
     const wait = gs.filter(g => s[g.key].status === 'waiting').length;
@@ -1209,6 +1238,7 @@ const Teacher = {
       <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${s.topic_updated_at && (Date.now() - new Date(s.topic_updated_at)) < 7 * 86400000 ? '<span class="tnew">학생 수정</span>' : ''}${esc(s.topic) || '주제 미정'}</div>${s.career ? `<div class="career-sm" title="진로 희망">🎯 ${esc(s.career)}</div>` : ''}</td>
       <td class="c-prog">${this.progressCell(s)}</td>
       <td class="c-todo">${this.todoCell(s)}</td>
+      <td class="c-seen">${this.seenCell(s)}</td>
       <td class="c-recent"><span class="recent">${rel(this.lastActivity(s))}</span></td></tr>`).join('');
     this.rowOrder = list.map(s => s.id);
     this.justStamped = null;
