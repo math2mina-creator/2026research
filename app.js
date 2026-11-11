@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-11';
+const APP_VERSION = '2026-11-12';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -165,6 +165,13 @@ const ORDER = ['waiting', 'revise', 'done', 'none'];
 const CONSENT_VERSION = '2026-1';
 const hasConsent = s => !!(s && s.consent_at && s.consent_version === CONSENT_VERSION);
 
+/* 주소 뒤 #표시를 바꿉니다. 일부 미리보기 환경에서 막히면 조용히 넘어갑니다 */
+function setHash(h, replace) {
+  try {
+    if (replace || !h) history.replaceState(null, '', h ? '#' + h : location.pathname + location.search);
+    else location.hash = h;
+  } catch (e) { try { if (h) location.hash = h; } catch (e2) { /* 무시 */ } }
+}
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
 const dateOf = ts => ts ? new Date(ts).toLocaleDateString('sv-SE') : '';
 function fmtDate(iso) {
@@ -527,6 +534,8 @@ const Teacher = {
     }
     this.shell();
     this.renderAll();
+    const m = location.hash.match(/^#student-([0-9a-zA-Z-]+)$/);
+    if (m && this.students.has(m[1])) this.openDrawer(m[1], true);
   },
 
   async load() {
@@ -572,6 +581,7 @@ const Teacher = {
       <div><h1 id="title"></h1><p class="sub" id="roleLine"></p></div>
       <div class="dues" id="dues"></div>
     </header>
+    <div id="listView">
     <section class="summary" id="summary" aria-label="제출 현황"></section>
     <details class="tstats" id="tstats" open hidden><summary>선생님별 제출 현황</summary><div class="tstats-box" id="tstatsBox"></div></details>
     <div class="tools">
@@ -606,18 +616,26 @@ const Teacher = {
     </div>
     <p class="count" id="count"></p>
     <div class="tablebox">
-      <table><thead><tr><th>학번·이름</th><th>연구 주제</th><th>제출 현황</th><th>최근 활동</th></tr></thead><tbody id="rows"></tbody></table>
+      <table><thead><tr><th>학번·이름</th><th>연구 주제</th><th>진행 상황</th><th>할 일</th><th>최근 활동</th></tr></thead><tbody id="rows"></tbody></table>
       <div id="empty"></div>
+    </div>
     </div>
 
     <div class="scrim" id="scrim"></div>
-    <aside class="drawer" id="drawer" aria-label="학생 상세" aria-hidden="true">
-      <div class="dhead"><h2 id="dTitle"></h2><button class="x" id="dClose" aria-label="닫기">×</button></div>
+    <section class="detail" id="drawer" aria-label="학생 상세" hidden>
+      <div class="dtop">
+        <button class="btn" id="dClose">← 목록으로</button>
+        <h2 id="dTitle"></h2>
+        <span class="spacer"></span>
+        <span class="hint" id="dPos"></span>
+        <button class="btn sm" id="dPrev">← 이전 학생</button>
+        <button class="btn sm" id="dNext">다음 학생 →</button>
+      </div>
       <div class="guard" id="guard"><span style="flex:1">저장하지 않은 변경이 있습니다.</span>
-        <button class="btn" id="gKeep">계속 편집</button><button class="btn danger armed" id="gDrop">버리고 닫기</button></div>
+        <button class="btn" id="gKeep">계속 편집</button><button class="btn danger armed" id="gDrop">버리고 이동</button></div>
       <div class="dbody" id="dBody"></div>
       <div class="dfoot"><button class="btn danger" id="dDel">학생 삭제</button><button class="btn sm" id="dZip">이 학생 파일 받기</button><span class="msg" id="dMsg"></span><button class="btn primary" id="dSave">저장</button></div>
-    </aside>
+    </section>
 
     <div class="modal" id="mBulk" role="dialog" aria-modal="true" aria-labelledby="mBulkT"><div class="mbox">
       <h2 id="mBulkT">명단 붙여넣기</h2>
@@ -809,7 +827,22 @@ const Teacher = {
     $('dSave').onclick = () => this.save();
     $('dDel').onclick = () => this.remove();
     $('gKeep').onclick = () => $('guard').classList.remove('on');
-    $('gDrop').onclick = () => this.closeDrawer(true);
+    $('gDrop').onclick = () => {
+      const nav = this.pendingNav; this.pendingNav = null;
+      if (nav) { this.dirty = false; this.openDrawer(nav); } else this.closeDrawer(true);
+    };
+    $('dPrev').onclick = () => this.navStudent(-1);
+    $('dNext').onclick = () => this.navStudent(1);
+    window.onhashchange = () => {
+      const m = location.hash.match(/^#student-([0-9a-zA-Z-]+)$/);
+      if (m && m[1] !== this.openId && this.students.has(m[1])) {
+        if (this.dirty) { this.pendingNav = m[1]; $('guard').classList.add('on'); setHash('student-' + this.openId, true); return; }
+        this.openDrawer(m[1], true);
+      } else if (!m && this.openId && $('drawer').classList.contains('on')) {
+        if (this.dirty) { $('guard').classList.add('on'); setHash('student-' + this.openId, true); return; }
+        this.closeDrawer(true, true);
+      }
+    };
     $('bulkText').oninput = () => { const n = this.parseBulk($('bulkText').value).length; $('bulkMsg').textContent = n ? `${n}줄 인식됨` : ''; };
     $('bulkGo').onclick = () => this.applyBulk();
     $('setGo').onclick = () => this.saveSettings();
@@ -1005,6 +1038,31 @@ const Teacher = {
     return true;
   },
 
+  /* 목록: 단계별 진행 막대 */
+  progressCell(s) {
+    const gs = stagesFor(s);
+    const done = gs.filter(g => s[g.key].status === 'done').length;
+    const steps = gs.map(g => {
+      const k = s[g.key].status || 'none';
+      const late = k === 'none' && isPast(dueFrom(this.settings, g.due));
+      return `<span class="ms ${k}${late ? ' late' : ''}${this.justStamped === s.id + g.key ? ' pressed' : ''}" title="${g.full}: ${ST[k].label}${late ? ' (마감 지남)' : ''}"><i></i><b>${g.label}</b></span>`;
+    }).join('');
+    return `<div class="ministeps">${steps}</div><div class="pcount">확인 완료 <b>${done}</b>/${gs.length}</div>`;
+  },
+  /* 목록: 선생님이 할 일 */
+  todoCell(s) {
+    const gs = stagesFor(s);
+    const wait = gs.filter(g => s[g.key].status === 'waiting').length;
+    const rev = gs.filter(g => s[g.key].status === 'revise').length;
+    const late = gs.filter(g => s[g.key].status === 'none' && isPast(dueFrom(this.settings, g.due))).length;
+    const tags = [];
+    if (wait) tags.push(`<span class="tag wait">피드백 대기 ${wait}</span>`);
+    if (rev) tags.push(`<span class="tag rev">보완 요청 중 ${rev}</span>`);
+    if (late) tags.push(`<span class="tag late">마감 지남 ${late}</span>`);
+    if (!tags.length && gs.every(g => s[g.key].status === 'done')) tags.push('<span class="tag done">모두 완료</span>');
+    return tags.join('') || '<span class="hint">—</span>';
+  },
+
   partsCell(s) {
     const pk = s.plan.status || 'none';
     const planChip = `<span class="chip ${pk} plan${this.justStamped === s.id + 'plan' ? ' pressed' : ''}" title="연구계획서: ${ST[pk].label}">${pk === 'done' ? '✓ ' : ''}계획서</span>`;
@@ -1048,8 +1106,10 @@ const Teacher = {
     $('rows').innerHTML = list.map(s => `<tr data-id="${esc(s.id)}" tabindex="0">
       <td class="c-who"><span class="sid">${esc(s.sid) || '—'}</span> <span class="nm">${esc(s.name)}</span>${this.isAdmin ? (s.teacher_email ? `<span class="tch">${esc(this.tName(s.teacher_email))}</span>` : '<span class="tch none">미배정</span>') : ''}${!s.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(s) ? '' : '<span class="nomail">동의 전</span>'}</td>
       <td class="c-topic"><div class="topic${s.topic ? '' : ' empty'}" title="${esc(s.topic)}">${s.topic_updated_at && (Date.now() - new Date(s.topic_updated_at)) < 7 * 86400000 ? '<span class="tnew">학생 수정</span>' : ''}${esc(s.topic) || '주제 미정'}</div></td>
-      <td class="c-report">${this.partsCell(s)}</td>
+      <td class="c-prog">${this.progressCell(s)}</td>
+      <td class="c-todo">${this.todoCell(s)}</td>
       <td class="c-recent"><span class="recent">${rel(this.lastActivity(s))}</span></td></tr>`).join('');
+    this.rowOrder = list.map(s => s.id);
     this.justStamped = null;
     $('rows').querySelectorAll('tr').forEach(tr => {
       tr.onclick = () => this.openDrawer(tr.dataset.id);
@@ -1068,7 +1128,16 @@ const Teacher = {
   },
 
   /* ----- 상세 창 ----- */
-  openDrawer(id) {
+  navStudent(step) {
+    const order = this.rowOrder || [];
+    const i = order.indexOf(this.openId);
+    const next = order[i + step];
+    if (!next) return;
+    if (this.dirty) { this.pendingNav = next; $('guard').classList.add('on'); $('gKeep').focus(); return; }
+    this.openDrawer(next);
+  },
+
+  openDrawer(id, fromHash) {
     const src = id ? this.students.get(id) : null;
     if (id && !src) return;
     this.isNew = !id;
@@ -1083,22 +1152,36 @@ const Teacher = {
     this.ai = { sid: id, row: null, busy: false, msg: '', loaded: false, pack: null };
     this.renderDrawer();
     if (id) this.loadAI(id);
+    if (!$('drawer').classList.contains('on')) this.listScroll = window.scrollY;
+    $('listView').hidden = true;
+    $('drawer').hidden = false;
     $('drawer').classList.add('on');
-    $('scrim').classList.add('on');
-    $('drawer').setAttribute('aria-hidden', 'false');
     $('guard').classList.remove('on');
-    setTimeout(() => { const f = this.isNew ? $('f-sid') : $('dClose'); if (f) f.focus(); }, 60);
+    if (id && !fromHash && location.hash !== '#student-' + id) location.hash = 'student-' + id;
+    if (!id && location.hash) setHash('');
+    const order = this.rowOrder || [];
+    const i = id ? order.indexOf(id) : -1;
+    $('dPrev').disabled = i <= 0;
+    $('dNext').disabled = i < 0 || i >= order.length - 1;
+    $('dPrev').hidden = $('dNext').hidden = !id;
+    $('dPos').textContent = i >= 0 ? `${i + 1} / ${order.length}` : '';
+    window.scrollTo(0, 0);
+    setTimeout(() => { const f = this.isNew ? $('f-sid') : null; if (f) f.focus(); }, 60);
   },
 
-  closeDrawer(force) {
-    if (this.dirty && !force) { $('guard').classList.add('on'); $('gKeep').focus(); return; }
+  closeDrawer(force, fromHash) {
+    if (this.dirty && !force) { this.pendingNav = null; $('guard').classList.add('on'); $('gKeep').focus(); return; }
     $('drawer').classList.remove('on');
-    $('scrim').classList.remove('on');
-    $('drawer').setAttribute('aria-hidden', 'true');
+    $('drawer').hidden = true;
+    $('listView').hidden = false;
     $('guard').classList.remove('on');
     const prev = this.openId;
     this.openId = null; this.draft = null; this.dirty = false; this.isNew = false;
-    if (prev) { const tr = $('rows').querySelector(`tr[data-id="${CSS.escape(prev)}"]`); if (tr) tr.focus(); }
+    if (!fromHash && location.hash) setHash('');
+    this.renderSummary();
+    this.renderRows();
+    window.scrollTo(0, this.listScroll || 0);
+    if (prev) { const tr = $('rows').querySelector(`tr[data-id="${CSS.escape(prev)}"]`); if (tr) { tr.focus({ preventScroll: true }); tr.classList.add('flash'); setTimeout(() => tr.classList.remove('flash'), 1200); } }
   },
 
   setDirty() { this.dirty = true; this.updateFoot(); },
@@ -1128,9 +1211,11 @@ const Teacher = {
       return `<li class="k-${e.kind}"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>${who}</span>${e.status ? `<span class="pill ${e.status}">${ST[e.status].label}</span>` : ''}${seen}
         ${e.kind !== 'submit' && e.kind !== 'cancel' ? `<button class="del" data-del="${esc(e.id)}" aria-label="이 기록 삭제">삭제</button>` : ''}</div>${body}</li>`;
     }).join('');
-    return `<section class="stage" data-stage="${g.key}">
-      ${g.key === 'plan' ? '<h3 class="group-h">연구계획서</h3>' : ''}${g.key === PARTS[0].key ? '<h3 class="group-h">최종보고서</h3>' : ''}${g.key === 'extra' ? '<h3 class="group-h">개인연구보고서</h3>' : ''}${g.key === 'output' ? '<h3 class="group-h">산출물</h3>' : ''}
-      <div class="stage-h"><h3>${g.group === 'report' ? g.full.replace('최종보고서 ', '') : g.group === 'extra' || g.group === 'output' || g.group === 'plan' ? '제출물' : g.label}${g.desc ? `<small class="desc">${g.desc}</small>` : ''}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : ''}</div>
+    const memoN = this.openId ? this.memosFor(this.openId, g.key).length : 0;
+    const due = dueFrom(this.settings, g.due);
+    return `<section class="stage card" data-stage="${g.key}" id="card-${g.key}">
+      <div class="stage-h"><h3>${g.full}${g.desc ? `<small class="desc">${g.desc}</small>` : ''}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : `<span class="pill ${k}">${ST[k].label}</span>`}</div>
+      <p class="hint card-meta">${st.submitted_at ? `${fmtDT(st.submitted_at)} 제출${due && dateOf(st.submitted_at) > due ? ' <span class="warn">(지각)</span>' : ''}` : '아직 제출하지 않음'}${due ? ` · 마감 ${fmtDate(due)}` : ''}${memoN ? ` · 본문 메모 ${memoN}개` : ''}</p>
       ${st.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(st.file_name || '제출 파일')}</span><button class="btn sm primary" data-review="${g.key}">보면서 피드백 쓰기</button></div>` : ''}
       <div class="seg" role="radiogroup" aria-label="${g.label} 상태">
         ${['none', 'waiting', 'revise', 'done'].map(s => `<label class="${k === s ? 'sel-' + s : ''}"><input type="radio" name="st-${g.key}" value="${s}" ${k === s ? 'checked' : ''}><span>${ST[s].label}</span></label>`).join('')}
@@ -1142,14 +1227,27 @@ const Teacher = {
       </div>
       <div class="field"><label class="l">새 피드백</label><textarea class="in" data-fb="${g.key}" placeholder="학생에게 보일 피드백을 적으세요. 저장하면 학생 화면에 바로 나타납니다.">${esc(this.fb[g.key])}</textarea>
         <p class="hint">상태를 바꾸고 피드백을 함께 저장하면 그 상태와 함께 기록됩니다.</p></div>
-      ${evHTML ? `<ul class="hist">${evHTML}</ul>` : '<p class="hint">아직 기록이 없습니다.</p>'}
+      ${evHTML ? this.histHTML(evHTML) : '<p class="hint">아직 기록이 없습니다.</p>'}
     </section>`;
+  },
+  /* 기록은 최근 3개만 펼치고 나머지는 접어 둡니다 */
+  histHTML(evHTML) {
+    const items = evHTML.split('<li class="k-').filter(Boolean).map(x => '<li class="k-' + x);
+    if (items.length <= 3) return `<ul class="hist">${items.join('')}</ul>`;
+    return `<ul class="hist">${items.slice(0, 3).join('')}</ul><details class="hist-more"><summary>이전 기록 ${items.length - 3}개 더 보기</summary><ul class="hist">${items.slice(3).join('')}</ul></details>`;
+  },
+  stepperHTML(d) {
+    return `<div class="stepper">${stagesFor(d).map(g => {
+      const k = d[g.key].status || 'none';
+      const late = k === 'none' && isPast(dueFrom(this.settings, g.due));
+      return `<button class="step ${k}${late ? ' late' : ''}" data-jump="${g.key}"><span class="dot">${k === 'done' ? '✓' : ''}</span><span class="lb">${g.label}</span><span class="st">${late ? '마감 지남' : ST[k].label}</span></button>`;
+    }).join('')}</div>`;
   },
 
   renderDrawer() {
     const d = this.draft;
-    $('dTitle').textContent = this.isNew ? '새 학생' : ((d.sid ? d.sid + ' ' : '') + (d.name || ''));
-    $('dBody').innerHTML = `
+    $('dTitle').textContent = this.isNew ? '새 학생 추가' : '';
+    const infoCard = `<section class="card d-info"><h3>학생 정보</h3>
       <div class="grid2">
         <div class="field"><label class="l" for="f-sid">학번</label><input class="in" id="f-sid" data-k="sid" inputmode="numeric" value="${esc(d.sid)}"></div>
         <div class="field"><label class="l" for="f-name">이름</label><input class="in" id="f-name" data-k="name" value="${esc(d.name)}"></div>
@@ -1163,10 +1261,44 @@ const Teacher = {
       <div class="field"><label class="l" for="f-topic">연구 주제</label><input class="in" id="f-topic" data-k="topic" value="${esc(d.topic)}">
         ${d.topic_updated_at ? `<p class="hint">학생이 ${fmtDT(d.topic_updated_at)}에 수정함${d.topic_prev ? ` · 이전 주제: ${esc(d.topic_prev)}` : ''}</p>` : ''}</div>
       <label class="agree small"><input type="checkbox" id="f-extra" ${d.extra_required ? 'checked' : ''}> <span>실험 대상 학생 (개인연구보고서 추가 제출)</span></label>
-      ${this.isNew ? '' : `<p class="hint" style="margin:-4px 0 12px">개인정보 수집·이용 동의: ${hasConsent(d) ? fmtDT(d.consent_at) + ' 동의함' + (/^data:image\/png;base64,/.test(d.consent_signature || '') ? `<br><img class="sig" src="${d.consent_signature}" alt="${esc(d.name)} 학생 서명">` : '') : '<span class="warn">아직 동의하지 않음</span> (학생이 처음 로그인할 때 동의 화면이 나옵니다)'}</p>`}
-      <div class="field"><label class="l" for="f-memo">지도 메모 (학생에게 보이지 않음)</label><textarea class="in" id="f-memo" data-k="memo" rows="3">${esc(d.memo)}</textarea></div>
-      ${stagesFor(d).map(g => this.stageHTML(g)).join('')}
-      ${this.isNew ? '' : this.aiHTML()}`;
+    </section>`;
+    if (this.isNew) {
+      $('dBody').innerHTML = `<div class="d-new">${infoCard}<p class="hint">학번과 이름을 넣고 아래 <b>저장</b>을 누르면 학생이 추가됩니다.</p></div>`;
+    } else {
+      const gs = stagesFor(d);
+      const done = gs.filter(g => d[g.key].status === 'done').length;
+      $('dBody').innerHTML = `
+      <section class="d-head">
+        <div class="d-id">
+          <span class="d-sid">${esc(d.sid || '')}${d.cls ? ` · ${esc(d.cls)}반` : ''}</span>
+          <h1>${esc(d.name || '')}</h1>
+          <span class="d-badges">
+            ${d.teacher_email ? `<span class="tch">담당 ${esc(this.tName(d.teacher_email))}</span>` : '<span class="tch none">담당 미배정</span>'}
+            ${!d.email ? '<span class="nomail">이메일 없음</span>' : hasConsent(d) ? '<span class="okb">동의 완료</span>' : '<span class="nomail">동의 전</span>'}
+            ${d.extra_required ? '<span class="tch">실험 대상</span>' : ''}
+          </span>
+          <span class="spacer"></span>
+          <span class="d-done">확인 완료 <b>${done}</b> / ${gs.length}</span>
+        </div>
+        <p class="d-topic">${d.topic ? esc(d.topic) : '<span class="hint">연구 주제 미정</span>'}</p>
+        ${this.stepperHTML(d)}
+      </section>
+      <h2 class="d-sec">제출물</h2>
+      <div class="d-grid">${gs.map(g => this.stageHTML(g)).join('')}</div>
+      <h2 class="d-sec">학생 정보와 지도 메모</h2>
+      <div class="d-grid">
+        ${infoCard}
+        <section class="card"><h3>지도 메모 <small class="desc">학생에게 보이지 않아요</small></h3>
+          <textarea class="in" id="f-memo" data-k="memo" rows="6">${esc(d.memo)}</textarea>
+          <p class="hint" style="margin-top:12px">개인정보 수집·이용 동의: ${hasConsent(d) ? fmtDT(d.consent_at) + ' 동의함' + (/^data:image\/png;base64,/.test(d.consent_signature || '') ? `<br><img class="sig" src="${d.consent_signature}" alt="${esc(d.name)} 학생 서명">` : '') : '<span class="warn">아직 동의하지 않음</span> (학생이 처음 로그인할 때 동의 화면이 나옵니다)'}</p>
+        </section>
+      </div>
+      ${this.aiHTML()}`;
+      $('dBody').querySelectorAll('[data-jump]').forEach(b => b.onclick = () => {
+        const c = $('card-' + b.dataset.jump);
+        if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'start' }); c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 1200); }
+      });
+    }
     this.bindDrawer();
     $('f-extra').onchange = () => { this.keepFb(); this.draft.extra_required = $('f-extra').checked; this.setDirty(); this.renderDrawer(); };
     if (!this.isNew) this.bindAI();
