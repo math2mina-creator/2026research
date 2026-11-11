@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-12';
+const APP_VERSION = '2026-11-12b';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -583,7 +583,6 @@ const Teacher = {
     </header>
     <div id="listView">
     <section class="summary" id="summary" aria-label="제출 현황"></section>
-    <details class="tstats" id="tstats" open hidden><summary>선생님별 제출 현황</summary><div class="tstats-box" id="tstatsBox"></div></details>
     <div class="tools">
       <input class="search" id="q" type="search" placeholder="이름, 학번, 연구 주제로 찾기" aria-label="검색">
       <select class="f" id="fcls" aria-label="반"></select>
