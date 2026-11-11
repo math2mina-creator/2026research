@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-16b';
+const APP_VERSION = '2026-11-16c';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -143,6 +143,32 @@ const AI_PARTS = [
   { key: 'overall', label: '전체 요약', model: 'Sonnet' }
 ];
 const AI_MAX_GEN = 4;
+/* 예전에 원문 그대로 저장된(끝이 잘린) 요약을 칸별로 다시 나눠 보여 줍니다 */
+function aiTolerantJSON(text) {
+  const start = String(text || '').indexOf('{');
+  if (start < 0) return null;
+  const t = text.slice(start);
+  try { return JSON.parse(t.slice(0, t.lastIndexOf('}') + 1)); } catch (e) { /* 아래에서 고침 */ }
+  let out = '', inStr = false, escp = false;
+  const stack = [];
+  for (const ch of t) {
+    out += ch;
+    if (inStr) { if (escp) escp = false; else if (ch === '\\') escp = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true; else if (ch === '{') stack.push('}'); else if (ch === '[') stack.push(']'); else if (ch === '}' || ch === ']') stack.pop();
+  }
+  if (escp) out = out.slice(0, -1);
+  if (inStr) out += '"';
+  out = out.replace(/,\s*$/, '').replace(/,\s*"[^"]*"\s*$/, '').replace(/:\s*$/, ': ""');
+  while (stack.length) out += stack.pop();
+  try { return JSON.parse(out); } catch (e) { return null; }
+}
+function fixAiSummary(sm) {
+  if (!sm || typeof sm.summary !== 'string' || !/^\s*\{\s*"/.test(sm.summary)) return sm;
+  const o = aiTolerantJSON(sm.summary);
+  if (!o || typeof o !== 'object') return sm;
+  o.notes = [...(Array.isArray(o.notes) ? o.notes : []), '응답이 길어 끝부분이 잘려 있던 요약이에요. 필요하면 다시 요약하세요.'];
+  return o;
+}
 async function apiPost(path, body) {
   const { data } = await sb.auth.getSession();
   const token = data && data.session ? data.session.access_token : '';
@@ -2355,7 +2381,7 @@ const Teacher = {
     const ov = this.aiRow(s.id, 'overall');
     let ovBody = '<p class="hint">파트 요약이 끝나면 전체 요약을 만들 수 있어요. (AI 요약 창에서 일괄 생성, 또는 여기서 지금 요약)</p>';
     if (ov && ov.status === 'done' && ov.summary) {
-      const o = ov.summary;
+      const o = fixAiSummary(ov.summary);
       const comp = o.career && Array.isArray(o.career.competencies) ? o.career.competencies : [];
       ovBody = `${field('활동 흐름', o.flow)}
         ${Array.isArray(o.revisions) && o.revisions.length ? `<div class="ais-f"><b>피드백 → 수정 과정</b><div class="ais-tw"><table class="ais-t"><thead><tr><th>파트</th><th>선생님 피드백</th><th>학생 수정</th></tr></thead><tbody>${o.revisions.map(x => `<tr><td>${esc(x.part || '')}</td><td>${esc(x.feedback || '')}</td><td>${esc(x.change || '')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
@@ -2368,7 +2394,7 @@ const Teacher = {
       const st = !cur ? '<span class="pill none">미제출</span>' : !r ? '<span class="pill none">요약 없음</span>'
         : r.status === 'done' ? '<span class="pill done">요약 완료</span>' : r.status === 'queued' ? '<span class="pill waiting">진행 중</span>'
         : `<span class="pill revise">${r.status === 'skipped' ? '제외' : '실패'}</span>`;
-      const sm = r && r.status === 'done' && r.summary ? r.summary : null;
+      const sm = r && r.status === 'done' && r.summary ? fixAiSummary(r.summary) : null;
       return `<details class="ais-part"><summary><span class="ais-pl">${p.label}</span>${st}<span class="mdl ${p.model.toLowerCase()}">${p.model}</span></summary>
         <div class="ais-pbody">${meta(r, cur)}
           ${sm ? `${field('요약', sm.summary)}${field('탐구 질문', sm.question)}${field('동기·목적', sm.motivation)}${field('방법·과정', sm.method)}${field('결과·결론', sm.result)}${field('일정', sm.schedule)}${field('활용 자료', sm.materials)}${field('그림', sm.figures)}${field('피드백 반영', sm.revision)}${field('확인할 점', sm.notes)}` : ''}
