@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-16';
+const APP_VERSION = '2026-11-16b';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -2244,7 +2244,8 @@ const Teacher = {
     return list.filter(s => {
       if (!this.aiApplies(s, part)) return false;
       const r = this.aiRow(s.id, part);
-      if (r && (r.status === 'done' || r.status === 'queued' || (r.status === 'skipped' && part !== 'overall'))) return false;
+      /* 형식 제외·내용 없음은 다시 보내지 않고, 읽기 실패·파일 못 받음은 다시 시도합니다 */
+      if (r && (r.status === 'done' || r.status === 'queued' || (r.status === 'skipped' && part !== 'overall' && !/읽기 실패|받지 못함/.test(r.error || '')))) return false;
       if (part === 'overall') {
         const rows = AI_PARTS.filter(p => p.key !== 'overall' && this.aiApplies(s, p.key)).map(p => this.aiRow(s.id, p.key));
         return rows.some(x => x && x.status === 'done') && !rows.some(x => x && x.status === 'queued');
