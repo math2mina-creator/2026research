@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-13';
+const APP_VERSION = '2026-11-13b';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -1243,6 +1243,38 @@ const Teacher = {
     if (items.length <= 3) return `<ul class="hist">${items.join('')}</ul>`;
     return `<ul class="hist">${items.slice(0, 3).join('')}</ul><details class="hist-more"><summary>이전 기록 ${items.length - 3}개 더 보기</summary><ul class="hist">${items.slice(3).join('')}</ul></details>`;
   },
+  /* 지금 피드백할 보고서: 저장된 상태 기준, 피드백 대기 중 가장 먼저 낸 것 */
+  feedbackNow() {
+    const o = this.orig;
+    if (!o) return {};
+    const gs = stagesFor(o);
+    const waiting = gs.filter(g => o[g.key].status === 'waiting')
+      .sort((a, b) => String(o[a.key].submitted_at || '').localeCompare(String(o[b.key].submitted_at || '')));
+    if (waiting.length) return { g: waiting[0], count: waiting.length };
+    const rev = gs.find(g => o[g.key].status === 'revise');
+    if (rev) return { info: 'revise', g2: rev };
+    if (gs.every(g => o[g.key].status === 'done')) return { info: 'alldone' };
+    const next = gs.find(g => o[g.key].status === 'none');
+    return { info: 'next', g2: next };
+  },
+  feedbackNowHTML(f) {
+    if (!f.g) {
+      const g2 = f.g2, due = g2 ? dueFrom(this.settings, g2.due) : null;
+      const msg = f.info === 'alldone' ? '모든 보고서를 확인했어요. 수고하셨어요!'
+        : f.info === 'revise' ? `지금 피드백할 보고서는 없어요. 학생이 <b>${g2.full}</b>을(를) 고치는 중이에요. 수정본이 오면 여기에 나타나요.`
+        : `지금 피드백할 보고서는 없어요. 다음 제출 차례는 <b>${g2 ? g2.full : ''}</b>${due ? ` (마감 ${fmtDate(due)}${isPast(due) ? ', 마감 지남' : ''})` : ''}이에요.`;
+      return `<section class="now-box empty" id="fnowBox"><h2>지금 피드백할 보고서</h2><p class="now-why">${msg}</p></section>`;
+    }
+    const g = f.g, sub = this.orig[g.key];
+    const days = sub.submitted_at ? Math.max(0, Math.floor((Date.now() - new Date(sub.submitted_at)) / 86400000)) : 0;
+    const why = `${sub.submitted_at ? `${fmtDT(sub.submitted_at)}에 제출해서 <b>${days ? days + '일째' : '오늘'}</b> 피드백을 기다리고 있어요.` : '피드백을 기다리고 있어요.'}${f.count > 1 ? ` 피드백 대기 ${f.count}개 중 가장 먼저 낸 보고서예요.` : ''}`;
+    return `<section class="now-box teacher${days >= 7 ? ' old' : ''}" id="fnowBox">
+      <h2>지금 피드백할 보고서 <span class="now-name">${g.full}</span></h2>
+      <p class="now-why">${why}</p>
+      <div class="d-grid one">${this.stageHTML(g)}</div>
+    </section>`;
+  },
+
   stepperHTML(d) {
     return `<div class="stepper">${stagesFor(d).map(g => {
       const k = d[g.key].status || 'none';
@@ -1276,6 +1308,7 @@ const Teacher = {
     } else {
       const gs = stagesFor(d);
       const done = gs.filter(g => d[g.key].status === 'done').length;
+      const fnow = this.feedbackNow();
       $('dBody').innerHTML = `
       <section class="d-head">
         <div class="d-id">
@@ -1293,8 +1326,11 @@ const Teacher = {
         <p class="d-career">🎯 진로 희망 · ${d.career ? `<b>${esc(d.career)}</b>` : '<span class="hint">아직 적지 않음</span>'}</p>
         ${this.stepperHTML(d)}
       </section>
+      ${this.feedbackNowHTML(fnow)}
       <h2 class="d-sec">제출물</h2>
-      <div class="d-grid">${gs.map(g => this.stageHTML(g)).join('')}</div>
+      <div class="d-grid">${gs.map(g => fnow.g && fnow.g.key === g.key
+        ? `<section class="card moved"><h3>${g.full}</h3><p class="hint">위쪽 <b>지금 피드백할 보고서</b> 칸에 있어요.</p><button class="btn sm" data-go-fnow>바로 가기 ↑</button></section>`
+        : this.stageHTML(g)).join('')}</div>
       <h2 class="d-sec">학생 정보와 지도 메모</h2>
       <div class="d-grid">
         ${infoCard}
@@ -1304,6 +1340,10 @@ const Teacher = {
         </section>
       </div>
       ${this.aiHTML()}`;
+      $('dBody').querySelectorAll('[data-go-fnow]').forEach(b => b.onclick = () => {
+        const box = $('fnowBox');
+        if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'start' }); box.classList.add('flash'); setTimeout(() => box.classList.remove('flash'), 1200); }
+      });
       $('dBody').querySelectorAll('[data-jump]').forEach(b => b.onclick = () => {
         const c = $('card-' + b.dataset.jump);
         if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'start' }); c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 1200); }
