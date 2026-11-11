@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-12b';
+const APP_VERSION = '2026-11-12c';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -582,6 +582,23 @@ const Teacher = {
       <div class="dues" id="dues"></div>
     </header>
     <div id="listView">
+    <div class="actions" role="toolbar" aria-label="관리 메뉴">
+      <div class="act-group">
+        <button class="btn primary" id="bAdd">학생 추가</button>
+        <button class="btn" id="bBulk">명단 붙여넣기</button>
+        <button class="btn admin-only" id="bAssign">담당 배정</button>
+      </div>
+      <div class="act-group">
+        <button class="btn" id="bAnn">공지사항</button>
+        <button class="btn admin-only" id="bTpl">양식 관리</button>
+      </div>
+      <span class="spacer"></span>
+      <div class="act-group">
+        <button class="btn" id="bCsv">CSV 내보내기</button>
+        <button class="btn" id="bZip">전체 내려받기</button>
+        <button class="btn" id="bReload" title="새로고침" aria-label="새로고침">↻ 새로고침</button>
+      </div>
+    </div>
     <section class="summary" id="summary" aria-label="제출 현황"></section>
     <div class="tools">
       <input class="search" id="q" type="search" placeholder="이름, 학번, 연구 주제로 찾기" aria-label="검색">
@@ -603,15 +620,6 @@ const Teacher = {
       <select class="f" id="fsort" aria-label="정렬">
         <option value="sid">학번순</option><option value="name">이름순</option><option value="recent">최근 활동순</option>
       </select>
-      <span class="spacer"></span>
-      <button class="btn" id="bReload">새로고침</button>
-      <button class="btn" id="bAnn">공지사항</button>
-      <button class="btn admin-only" id="bAssign">담당 배정</button>
-      <button class="btn admin-only" id="bTpl">양식 관리</button>
-      <button class="btn" id="bBulk">명단 붙여넣기</button>
-      <button class="btn" id="bCsv">CSV 내보내기</button>
-      <button class="btn" id="bZip">전체 내려받기</button>
-      <button class="btn primary" id="bAdd">학생 추가</button>
     </div>
     <p class="count" id="count"></p>
     <div class="tablebox">

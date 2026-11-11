@@ -566,3 +566,14 @@ mark.memo-hl.on{background:#ffcf33;box-shadow:0 0 0 3px rgba(240,180,0,.35)}
   .tablebox td.c-prog{grid-column:1/-1;min-width:0}
   .tablebox td.c-todo{grid-column:1/-1}
 }
+
+/* 관리 메뉴 (맨 위) */
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:18px 0 0}
+.act-group{display:flex;flex-wrap:wrap;gap:6px}
+.actions .btn{padding:7px 12px;font-size:14px}
+.actions .btn[hidden]{display:none}
+.tools{margin-top:4px}
+@media (max-width:820px){ .actions .spacer{display:none} }
+.part-row,.part-row.plan-row{grid-template-columns:48px 1fr 44px}
+.part-row .pl{white-space:nowrap}
+.part-row.extra-row{grid-template-columns:96px 1fr 44px}
