@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-18';
+const APP_VERSION = '2026-11-18b';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -439,7 +439,16 @@ async function renderDoc(el, path, name) {
       host.className = 'hwp-host';
       el.appendChild(host);
       let ok = false;
-      try { new lib.Viewer(host, buf, { type: 'array' }); ok = host.querySelectorAll('[data-page-number]').length > 0; }
+      try {
+        new lib.Viewer(host, buf, { type: 'array' });
+        ok = host.querySelectorAll('[data-page-number]').length > 0;
+        /* 쪽 높이를 고정하지 않고 '최소 높이'로: 내용이 넘치면 쪽이 늘어나 잘리지 않게 */
+        host.querySelectorAll('div[data-page-number]:not(.hwpjs-observer)').forEach(pg => {
+          if (pg.style.height) { pg.style.minHeight = pg.style.height; pg.style.height = 'auto'; }
+          pg.style.boxSizing = 'border-box';
+          pg.style.marginBottom = '16px';
+        });
+      }
       catch (err) { console.warn('hwp viewer', err); }
       if (!ok) {
         /* 예비: 글만 보여 주는 간단 보기 */
