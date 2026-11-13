@@ -116,7 +116,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => JSON.parse(JSON.stringify(o));
 
 /* 사이트 파일을 바꿀 때마다 올리면 브라우저가 예전 파일 대신 새 파일을 받습니다 */
-const APP_VERSION = '2026-11-17c';
+const APP_VERSION = '2026-11-18';
 const BUCKET = 'submissions';
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.xlsx,.zip,.png,.jpg,.jpeg';
@@ -1334,20 +1334,23 @@ const Teacher = {
     const evs = this.draft.ev[g.key].filter(e => !this.delEvents.has(e.id));
     const evHTML = evs.map(e => {
       let body = '';
-      if (e.kind === 'submit') body = `<div class="note">학생이 파일을 제출했습니다: ${e.file_path ? `<button class="linkbtn" data-open="${esc(e.file_path)}">${esc(e.file_name || '파일')}</button>` : esc(e.file_name || '')}</div>`;
+      if (e.kind === 'submit') body = e.file_deleted
+        ? `<div class="note cancel-note">학생이 파일을 제출했습니다: ${esc(e.file_name || '파일')} (삭제됨)</div>`
+        : `<div class="note">학생이 파일을 제출했습니다: ${e.file_path ? `<button class="linkbtn" data-open="${esc(e.file_path)}">${esc(e.file_name || '파일')}</button> <button class="del" data-fdel="${g.key}" data-fpath="${esc(e.file_path)}" data-fname="${esc(e.file_name || '파일')}">파일 삭제</button>` : esc(e.file_name || '')}</div>`;
+      else if (e.kind === 'delete') body = `<div class="note cancel-note">선생님이 파일을 삭제했습니다: ${esc(e.file_name || '파일')}</div>`;
       else if (e.kind === 'cancel') body = `<div class="note cancel-note">학생이 제출을 취소했습니다: ${e.file_path ? `<button class="linkbtn" data-open="${esc(e.file_path)}">${esc(e.file_name || '파일')}</button>` : esc(e.file_name || '')}</div>`;
       else if (e.note) body = `<div class="note">${esc(e.note)}</div>`;
-      const who = e.kind === 'submit' ? '학생 제출' : e.kind === 'cancel' ? '학생 제출 취소' : e.kind === 'feedback' ? '피드백' : '상태 변경';
+      const who = e.kind === 'submit' ? '학생 제출' : e.kind === 'cancel' ? '학생 제출 취소' : e.kind === 'delete' ? '선생님 파일 삭제' : e.kind === 'feedback' ? '피드백' : '상태 변경';
       const seen = e.kind === 'feedback' ? (e.seen_at ? `<span class="seen">학생 읽음 ${fmtDT(e.seen_at)}</span>` : '<span class="unseen">학생 아직 안 읽음</span>') : '';
       return `<li class="k-${e.kind}"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>${who}</span>${e.status ? `<span class="pill ${e.status}">${ST[e.status].label}</span>` : ''}${seen}
-        ${e.kind !== 'submit' && e.kind !== 'cancel' ? `<button class="del" data-del="${esc(e.id)}" aria-label="이 기록 삭제">삭제</button>` : ''}</div>${body}</li>`;
+        ${e.kind !== 'submit' && e.kind !== 'cancel' && e.kind !== 'delete' ? `<button class="del" data-del="${esc(e.id)}" aria-label="이 기록 삭제">삭제</button>` : ''}</div>${body}</li>`;
     }).join('');
     const memoN = this.openId ? this.memosFor(this.openId, g.key).length : 0;
     const due = dueFrom(this.settings, g.due);
     return `<section class="stage card" data-stage="${g.key}" id="card-${g.key}">
       <div class="stage-h"><h3>${g.full}${g.desc ? `<small class="desc">${g.desc}</small>` : ''}</h3>${k === 'done' ? '<span class="stamp lg" aria-hidden="true">확인</span>' : `<span class="pill ${k}">${ST[k].label}</span>`}</div>
       <p class="hint card-meta">${st.submitted_at ? `${fmtDT(st.submitted_at)} 제출${due && dateOf(st.submitted_at) > due ? ' <span class="warn">(지각)</span>' : ''}` : '아직 제출하지 않음'}${due ? ` · 마감 ${fmtDate(due)}` : ''}${memoN ? ` · 본문 메모 ${memoN}개` : ''}</p>
-      ${st.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(st.file_name || '제출 파일')}</span><button class="btn sm primary" data-review="${g.key}">보면서 피드백 쓰기</button></div>` : ''}
+      ${st.file_path ? `<div class="filebox"><span class="fn">📄 ${esc(st.file_name || '제출 파일')}</span><button class="btn sm primary" data-review="${g.key}">보면서 피드백 쓰기</button><button class="btn sm danger" data-fdel="${g.key}" data-fpath="${esc(st.file_path)}" data-fname="${esc(st.file_name || '제출 파일')}">파일 삭제</button></div>` : ''}
       <div class="seg" role="radiogroup" aria-label="${g.label} 상태">
         ${['none', 'waiting', 'revise', 'done'].map(s => `<label class="${k === s ? 'sel-' + s : ''}"><input type="radio" name="st-${g.key}" value="${s}" ${k === s ? 'checked' : ''}><span>${ST[s].label}</span></label>`).join('')}
       </div>
@@ -1506,6 +1509,7 @@ const Teacher = {
       this.setDirty();
     });
     body.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openFile(b.dataset.open));
+    body.querySelectorAll('[data-fdel]').forEach(b => b.onclick = () => this.deleteFile(b));
     body.querySelectorAll('[data-review]').forEach(b => b.onclick = () => {
       if (this.dirty) { toast('먼저 저장하거나 변경을 취소하세요.'); return; }
       const id = this.openId;
@@ -2525,6 +2529,32 @@ const Teacher = {
   },
 
 
+  /* ----- 선생님이 학생 제출 파일 삭제 ----- */
+  async deleteFile(btn) {
+    if (this.dirty) { toast('먼저 저장하거나 변경을 취소한 뒤 파일을 지워 주세요.'); return; }
+    if (!btn.classList.contains('armed')) {
+      btn.classList.add('armed');
+      btn.dataset.label = btn.textContent;
+      btn.textContent = `‘${btn.dataset.fname}’ 정말 삭제? 한 번 더`;
+      setTimeout(() => { if (btn.isConnected && btn.classList.contains('armed')) { btn.classList.remove('armed'); btn.textContent = btn.dataset.label; } }, 4000);
+      return;
+    }
+    btn.disabled = true;
+    const id = this.openId, stage = btn.dataset.fdel, path = btn.dataset.fpath;
+    const { data, error } = await sb.rpc('teacher_delete_file', { p_student: id, p_stage: stage, p_path: path });
+    if (error) {
+      btn.disabled = false;
+      toast(/teacher_delete_file|function/i.test(error.message || '') ? '이 기능을 쓰려면 Supabase에서 update-teacher-delete.sql 을 먼저 실행하세요.' : (error.message || '파일을 지우지 못했습니다.'));
+      return;
+    }
+    const rm = await sb.storage.from(BUCKET).remove([path]);
+    try { await this.load(); } catch (e) { /* 아래에서 다시 그림 */ }
+    this.renderAll();
+    if (this.openId === id) this.openDrawer(id, true);
+    toast(rm.error ? '기록은 삭제로 바꿨지만 저장소 파일은 지우지 못했어요. 관리자에게 알려 주세요.'
+      : data === 'none' ? '파일을 삭제했어요. 이 보고서는 미제출로 돌아갔어요.' : '파일을 삭제했어요.');
+  },
+
   /* ----- 마감 지난 학생에게 알림 ----- */
   async sendOverdue(ids, btn) {
     if (!ids.length) { toast('보낼 학생이 없습니다.'); return; }
@@ -2862,7 +2892,7 @@ const Teacher = {
 
   csvFeedback(list) {
     const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-    const kind = { submit: '학생 제출', cancel: '학생 제출 취소', feedback: '피드백', status: '상태 변경' };
+    const kind = { submit: '학생 제출', cancel: '학생 제출 취소', delete: '선생님 파일 삭제', feedback: '피드백', status: '상태 변경' };
     const rows = [['학번', '이름', '항목', '시각', '종류', '상태', '내용·파일', '학생 읽음'].map(q).join(',')];
     list.forEach(s => stagesFor(s).forEach(g => [...s.ev[g.key]].sort((a, b) => a.created_at.localeCompare(b.created_at)).forEach(e => rows.push([
       s.sid, s.name, g.full, fmtDT(e.created_at), kind[e.kind] || e.kind, e.status ? ST[e.status].label : '',
@@ -2920,7 +2950,7 @@ const Teacher = {
         const base = o.layout === 'stage' ? who : safeName(stageLabel);
         if (cur.file_path) files.push({ path: cur.file_path, name: `${dir}/${base}_${safeName(cur.file_name || 'file')}` });
         if (o.old) {
-          s.ev[g.key].filter(e => e.kind === 'submit' && e.file_path && e.file_path !== cur.file_path)
+          s.ev[g.key].filter(e => e.kind === 'submit' && e.file_path && !e.file_deleted && e.file_path !== cur.file_path)
             .forEach(e => files.push({ path: e.file_path, name: `${dir}/이전 제출/${base}_${dateOf(e.created_at)}_${safeName(e.file_name || 'file')}` }));
         }
       });
@@ -3353,6 +3383,10 @@ const Student = {
     }[k];
     const timeline = evs.map(e => {
       if (e.kind === 'cancel') return `<li class="k-cancel"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>제출 취소</span></div>
+        <div class="note cancel-note">${esc(e.file_name || '제출 파일')}</div></li>`;
+      if (e.kind === 'delete') return `<li class="k-cancel"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>선생님이 파일을 삭제했어요</span></div>
+        <div class="note cancel-note">${esc(e.file_name || '제출 파일')}</div></li>`;
+      if (e.kind === 'submit' && e.file_deleted) return `<li class="k-cancel"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>내가 제출 (삭제됨)</span></div>
         <div class="note cancel-note">${esc(e.file_name || '제출 파일')}</div></li>`;
       if (e.kind === 'submit') return `<li class="k-submit"><div class="hmeta"><span>${fmtDT(e.created_at)}</span><span>내가 제출</span></div>
         <div class="note">${e.file_path ? `<button class="linkbtn" data-open="${esc(e.file_path)}">${esc(e.file_name || '제출 파일')}</button>` : esc(e.file_name || '')}</div></li>`;
